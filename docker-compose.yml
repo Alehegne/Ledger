@@ -1,0 +1,36 @@
+services:
+  backend:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/${DB_NAME:-Ledger_DB}
+      DB_USERNAME: ${DB_USERNAME:-myuser}
+      DB_PASSWORD: ${DB_PASSWORD:-mypassword}
+      DB_NAME: ${DB_NAME:-Ledger_DB}
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    image: postgres:16
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:-myuser}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-mypassword}
+      POSTGRES_DB: ${DB_NAME:-Ledger_DB}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    # Recommended optimization to prevent race conditions during startup
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${DB_USERNAME:-myuser} -d ${DB_NAME:-Ledger_DB}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  db_data:
