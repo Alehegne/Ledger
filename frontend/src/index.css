@@ -1,0 +1,144 @@
+@import url("https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-bg: 210 24% 97%;
+  --color-surface: 0 0% 100%;
+  --color-surface-muted: 210 20% 98%;
+  --color-border: 214 20% 88%;
+  --color-text: 222 44% 14%;
+  --color-muted: 220 12% 44%;
+  --color-primary: 220 65% 42%;
+  --color-success: 145 63% 35%;
+  --color-warning: 36 86% 44%;
+  --color-danger: 4 74% 48%;
+  --color-info: 206 75% 40%;
+  --focus-ring: 220 80% 52%;
+  --table-row-height: 2.75rem;
+  --control-height: 2.5rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: "Public Sans", system-ui, sans-serif;
+  background: hsl(var(--color-bg));
+  color: hsl(var(--color-text));
+  line-height: 1.4;
+}
+
+a,
+button,
+input,
+select,
+textarea {
+  outline-color: hsl(var(--focus-ring));
+}
+
+:focus-visible {
+  outline: 2px solid hsl(var(--focus-ring));
+  outline-offset: 2px;
+}
+
+@layer components {
+  .page-card {
+    @apply rounded-2xl border border-slate-200 bg-white shadow-sm;
+  }
+
+  .page-card-muted {
+    @apply rounded-2xl border border-slate-200 bg-slate-50;
+  }
+
+  .page-header-kicker {
+    @apply text-xs uppercase tracking-[0.2em] text-slate-500;
+  }
+
+  .page-title {
+    @apply mt-1 text-2xl font-semibold text-slate-900;
+  }
+
+  .input-control {
+    @apply h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900;
+  }
+
+  .input-control::placeholder {
+    @apply text-slate-400;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center gap-2 rounded-xl bg-slate-900 px-3.5 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center gap-2 rounded-xl border border-red-300 bg-white px-3.5 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .status-badge {
+    @apply inline-flex rounded-full px-2.5 py-1 text-xs font-medium;
+  }
+
+  .status-active {
+    @apply bg-emerald-100 text-emerald-700;
+  }
+
+  .status-inactive {
+    @apply bg-slate-200 text-slate-700;
+  }
+
+  .status-posted {
+    @apply bg-emerald-100 text-emerald-700;
+  }
+
+  .status-draft {
+    @apply bg-amber-100 text-amber-700;
+  }
+
+  .feedback-success {
+    @apply rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700;
+  }
+
+  .feedback-error {
+    @apply rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700;
+  }
+
+  .table-wrap {
+    @apply overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm;
+  }
+
+  .table-head {
+    @apply bg-slate-50 text-slate-600;
+  }
+
+  .table-cell-num {
+    @apply text-right tabular-nums text-slate-900;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
