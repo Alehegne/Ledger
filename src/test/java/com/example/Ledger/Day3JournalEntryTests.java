@@ -5,6 +5,7 @@ import com.example.Ledger.account.repository.AccountRepository;
 import com.example.Ledger.common.enums.AccountStatus;
 import com.example.Ledger.common.enums.AccountType;
 import com.example.Ledger.common.enums.Role;
+import com.example.Ledger.support.PostgresIntegrationTestSupport;
 import com.example.Ledger.organization.model.Organization;
 import com.example.Ledger.organization.repository.OrganizationRepository;
 import com.example.Ledger.user.model.LedgerUser;
@@ -32,7 +33,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class Day3JournalEntryTests {
+class Day3JournalEntryTests extends PostgresIntegrationTestSupport {
 
     @LocalServerPort
     private int port;
@@ -183,8 +184,8 @@ class Day3JournalEntryTests {
         JsonNode body = objectMapper.readTree(response.body());
         for (JsonNode item : body.get("items")) {
             assertThat(item.get("status").asText()).isEqualTo("POSTED");
+            assertThat(item.get("id").asLong()).isNotEqualTo(draftEntryId);
         }
-        assertThat(body.get("items").toString()).doesNotContain(draftEntryId.toString());
     }
 
     @Test
@@ -205,8 +206,8 @@ class Day3JournalEntryTests {
         assertThat(body.get("items").size()).isGreaterThanOrEqualTo(0);
         for (JsonNode item : body.get("items")) {
             assertThat(item.get("status").asText()).isNotEqualTo("DRAFT");
+            assertThat(item.get("id").asLong()).isNotEqualTo(draftEntryId);
         }
-        assertThat(body.get("items").toString()).doesNotContain(draftEntryId.toString());
     }
 
     @Test

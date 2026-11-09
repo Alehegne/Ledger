@@ -79,10 +79,25 @@ public class GlobalExceptionHandler {
             BusinessException ex,
             HttpServletRequest request
     ) {
-        HttpStatus status = "DUPLICATE_ACCOUNT_CODE".equals(ex.getCode())
-                ? HttpStatus.CONFLICT
-                : HttpStatus.UNPROCESSABLE_CONTENT;
+        HttpStatus status = switch (ex.getCode()) {
+            case "DUPLICATE_ACCOUNT_CODE", "CONCURRENT_MODIFICATION" ->
+                    HttpStatus.CONFLICT;
+            default -> HttpStatus.UNPROCESSABLE_CONTENT;
+        };
         return buildResponse(status, ex.getCode(), ex.getMessage(), request.getRequestURI());
+    }
+
+    @ExceptionHandler({org.springframework.dao.OptimisticLockingFailureException.class, jakarta.persistence.OptimisticLockException.class})
+    public ResponseEntity<ApiErrorResponse> handleOptimisticLocking(
+            Exception ex,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                "CONCURRENT_MODIFICATION",
+                "This record was modified by another transaction. Please refresh and try again.",
+                request.getRequestURI()
+        );
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)

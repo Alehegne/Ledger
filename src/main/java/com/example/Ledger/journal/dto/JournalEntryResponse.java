@@ -21,6 +21,9 @@ public record JournalEntryResponse(
         BigDecimal totalCredits,
         List<JournalLineResponse> lines,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        Long reversedByEntryId,
+        Long reversesEntryId,
+        String reversalReason
 ) {
 }

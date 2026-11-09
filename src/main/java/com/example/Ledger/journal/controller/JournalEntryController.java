@@ -80,7 +80,11 @@ public class JournalEntryController {
 
     @PostMapping("/journal-entries/{entryId}/reverse")
     @PreAuthorize("hasAnyRole('ADMIN','ACCOUNTANT')")
-    public JournalEntryResponse reverse(@PathVariable Long entryId) {
-        return journalReversalService.reverseEntry(entryId);
+    public JournalEntryResponse reverse(
+            @PathVariable Long entryId,
+            @Valid @RequestBody(required = false) com.example.Ledger.journal.dto.JournalReversalRequest request
+    ) {
+        String reason = request != null ? request.reason() : null;
+        return journalReversalService.reverseEntry(entryId, reason);
     }
 }

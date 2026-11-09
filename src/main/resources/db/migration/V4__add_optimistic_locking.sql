@@ -1,0 +1,9 @@
+-- V4: Add optimistic locking version column to all entities extending BaseEntity
+
+ALTER TABLE organization ADD COLUMN version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE app_user ADD COLUMN version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE account ADD COLUMN version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE journal_entry ADD COLUMN version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE journal_line ADD COLUMN version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE audit_log ADD COLUMN version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE invitation ADD COLUMN version BIGINT NOT NULL DEFAULT 0;

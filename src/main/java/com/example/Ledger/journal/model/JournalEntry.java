@@ -66,6 +66,14 @@ public class JournalEntry extends BaseEntity {
     @JoinColumn(name = "reversed_by_journal_entry_id")
     private JournalEntry reversedByEntry;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "reverses_journal_entry_id")
+    private JournalEntry reversesEntry;
+
+    @Size(max = 500)
+    @Column(name = "reversal_reason", length = 500)
+    private String reversalReason;
+
     @OneToMany(mappedBy = "journalEntry", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<JournalLine> lines = new ArrayList<>();
 
@@ -139,6 +147,22 @@ public class JournalEntry extends BaseEntity {
 
     public void setReversedByEntry(JournalEntry reversedByEntry) {
         this.reversedByEntry = reversedByEntry;
+    }
+
+    public JournalEntry getReversesEntry() {
+        return reversesEntry;
+    }
+
+    public void setReversesEntry(JournalEntry reversesEntry) {
+        this.reversesEntry = reversesEntry;
+    }
+
+    public String getReversalReason() {
+        return reversalReason;
+    }
+
+    public void setReversalReason(String reversalReason) {
+        this.reversalReason = reversalReason;
     }
 
     public List<JournalLine> getLines() {

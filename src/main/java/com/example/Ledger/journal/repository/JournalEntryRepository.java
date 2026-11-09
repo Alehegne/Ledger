@@ -17,10 +17,10 @@ import java.util.Optional;
 
 public interface JournalEntryRepository extends JpaRepository<JournalEntry, Long>, JpaSpecificationExecutor<JournalEntry> {
 
-		@EntityGraph(attributePaths = {"lines", "lines.account", "createdByUser", "postedByUser"})
+		@EntityGraph(attributePaths = {"lines", "lines.account", "createdByUser", "postedByUser", "reversedByEntry", "reversesEntry"})
 		Optional<JournalEntry> findByIdAndOrganizationId(Long id, Long organizationId);
 
-		@EntityGraph(attributePaths = {"lines", "lines.account", "createdByUser", "postedByUser"})
+		@EntityGraph(attributePaths = {"lines", "lines.account", "createdByUser", "postedByUser", "reversedByEntry", "reversesEntry"})
 		Page<JournalEntry> findByOrganizationIdOrderByTransactionDateDescIdDesc(Long organizationId, Pageable pageable);
 
 		long countByOrganizationIdAndStatus(Long organizationId, JournalEntryStatus status);
@@ -35,6 +35,6 @@ public interface JournalEntryRepository extends JpaRepository<JournalEntry, Long
 		Optional<JournalEntry> findByIdAndOrganizationIdForUpdate(@Param("id") Long id, @Param("organizationId") Long organizationId);
 
 		@Override
-		@EntityGraph(attributePaths = {"lines", "lines.account", "createdByUser", "postedByUser"})
+		@EntityGraph(attributePaths = {"lines", "lines.account", "createdByUser", "postedByUser", "reversedByEntry", "reversesEntry"})
 		Page<JournalEntry> findAll(Specification<JournalEntry> spec, Pageable pageable);
 }

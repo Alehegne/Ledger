@@ -450,7 +450,10 @@ public class JournalEntryService {
                 totalCredits,
                 lines,
                 entry.getCreatedAt(),
-                entry.getUpdatedAt()
+                entry.getUpdatedAt(),
+                entry.getReversedByEntry() == null ? null : entry.getReversedByEntry().getId(),
+                entry.getReversesEntry() == null ? null : entry.getReversesEntry().getId(),
+                entry.getReversalReason()
         );
     }
 }

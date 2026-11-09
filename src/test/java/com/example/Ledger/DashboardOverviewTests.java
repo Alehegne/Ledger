@@ -9,6 +9,7 @@ import com.example.Ledger.organization.model.Organization;
 import com.example.Ledger.organization.repository.OrganizationRepository;
 import com.example.Ledger.user.model.LedgerUser;
 import com.example.Ledger.user.repository.LedgerUserRepository;
+import com.example.Ledger.support.PostgresIntegrationTestSupport;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,7 +32,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class DashboardOverviewTests {
+class DashboardOverviewTests extends PostgresIntegrationTestSupport {
 
     @LocalServerPort
     private int port;
