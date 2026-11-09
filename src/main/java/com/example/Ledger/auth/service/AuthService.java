@@ -4,6 +4,7 @@ import com.example.Ledger.auth.dto.LoginRequest;
 import com.example.Ledger.auth.dto.LoginResponse;
 import com.example.Ledger.common.exception.UnauthorizedException;
 import com.example.Ledger.common.security.JwtService;
+import com.example.Ledger.organization.model.Organization;
 import com.example.Ledger.user.model.LedgerUser;
 import com.example.Ledger.user.repository.LedgerUserRepository;
 import org.slf4j.Logger;
@@ -25,16 +26,24 @@ public class AuthService {
     private final LedgerUserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final RefreshTokenService refreshTokenService;
 
-    public AuthService(LedgerUserRepository userRepository, PasswordEncoder passwordEncoder, JwtService jwtService) {
+    public AuthService(
+            LedgerUserRepository userRepository,
+            PasswordEncoder passwordEncoder,
+            JwtService jwtService,
+            RefreshTokenService refreshTokenService
+    ) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
+        this.refreshTokenService = refreshTokenService;
     }
 
+    @Transactional
     public LoginResponse login(LoginRequest request) {
         String normalizedEmail = normalizeEmail(request.email());
-        List<LedgerUser> candidates = userRepository.findAllByEmailIgnoreCase(normalizedEmail);
+        List<LedgerUser> candidates = userRepository.findAllWithOrganizationByEmailIgnoreCase(normalizedEmail);
         LedgerUser user = candidates.size() == 1 ? candidates.getFirst() : null;
 
         if (candidates.size() > 1) {
@@ -45,18 +54,24 @@ public class AuthService {
             throw new UnauthorizedException("Invalid email or password");
         }
 
+        Organization organization = user.getOrganization();
         String token = jwtService.generateToken(user);
         Instant expiresAt = jwtService.parseClaims(token).getExpiration().toInstant();
+        RefreshTokenService.IssuedRefreshToken refresh = refreshTokenService.issueRefreshToken(user);
 
         return new LoginResponse(
                 token,
                 expiresAt,
+                refresh.rawToken(),
+                refresh.expiresAt(),
                 new LoginResponse.UserSummary(
                         user.getId(),
                         user.getEmail(),
                         user.getFullName(),
                         user.getRole().name(),
-                        user.getOrganization() == null ? null : user.getOrganization().getId()
+                        organization == null ? null : organization.getId(),
+                        organization == null ? null : organization.getName(),
+                        organization == null ? null : organization.getBaseCurrency()
                 )
         );
     }

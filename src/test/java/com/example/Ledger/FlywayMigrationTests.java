@@ -43,7 +43,8 @@ class FlywayMigrationTests extends PostgresIntegrationTestSupport {
                 "journal_entry",
                 "journal_line",
                 "audit_log",
-                "invitation"
+                "invitation",
+                "refresh_token"
         );
 
         expectedTables.forEach(table -> {
@@ -67,7 +68,8 @@ class FlywayMigrationTests extends PostgresIntegrationTestSupport {
                 "journal_entry",
                 "journal_line",
                 "audit_log",
-                "invitation"
+                "invitation",
+                "refresh_token"
         );
 
         expectedTables.forEach(table -> {

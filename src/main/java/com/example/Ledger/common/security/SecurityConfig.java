@@ -43,7 +43,7 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/actuator/health", "/auth/login", "/error").permitAll()
+                        .requestMatchers("/actuator/health", "/auth/login", "/auth/refresh", "/auth/logout", "/error").permitAll()
                         .requestMatchers(HttpMethod.POST, "/organizations").hasRole("ADMIN")
                         .requestMatchers("/organizations/me", "/organizations/settings").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/users/invite").hasRole("ADMIN")
