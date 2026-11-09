@@ -5,6 +5,7 @@ import com.example.Ledger.account.repository.AccountRepository;
 import com.example.Ledger.common.enums.AccountStatus;
 import com.example.Ledger.common.enums.AccountType;
 import com.example.Ledger.common.enums.Role;
+import com.example.Ledger.support.PostgresIntegrationTestSupport;
 import com.example.Ledger.common.security.JwtService;
 import com.example.Ledger.organization.model.Organization;
 import com.example.Ledger.organization.repository.OrganizationRepository;
@@ -30,7 +31,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class Day2AuthenticationAndAccountTests {
+class Day2AuthenticationAndAccountTests extends PostgresIntegrationTestSupport {
 
     @LocalServerPort
     private int port;
@@ -54,6 +55,7 @@ class Day2AuthenticationAndAccountTests {
     private JwtService jwtService;
 
     private Organization organization;
+    private String organizationName;
     private LedgerUser admin;
     private LedgerUser accountant;
     private LedgerUser viewer;
@@ -64,9 +66,10 @@ class Day2AuthenticationAndAccountTests {
     @BeforeEach
     void setUp() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
+        organizationName = "Acme Org " + suffix;
 
         organization = new Organization();
-        organization.setName("Acme Org");
+        organization.setName(organizationName);
         organization.setBaseCurrency("ETB");
         organization = organizationRepository.save(organization);
 
@@ -176,6 +179,53 @@ class Day2AuthenticationAndAccountTests {
     }
 
     @Test
+    void accountantCannotCreateAccount() throws Exception {
+        String token = loginAs(accountantEmail, "Secret123!");
+        HttpResponse<String> response = postJsonWithToken("/accounts", token, Map.of(
+                "accountCode", "1000",
+                "name", "Cash",
+                "accountType", "ASSET",
+                "status", "ACTIVE"
+        ));
+
+        assertThat(response.statusCode()).isEqualTo(403);
+    }
+
+    @Test
+    void accountantCannotUpdateAccount() throws Exception {
+        String adminToken = loginAs(adminEmail, "Secret123!");
+        HttpResponse<String> createResponse = postJsonWithToken("/accounts", adminToken, Map.of(
+                "accountCode", "1010",
+                "name", "Petty Cash",
+                "accountType", "ASSET",
+                "status", "ACTIVE"
+        ));
+        Long accountId = objectMapper.readTree(createResponse.body()).get("id").asLong();
+
+        String accountantToken = loginAs(accountantEmail, "Secret123!");
+        HttpResponse<String> patchResponse = patchJsonWithToken("/accounts/" + accountId, accountantToken, Map.of(
+                "name", "Modified Name"
+        ));
+        assertThat(patchResponse.statusCode()).isEqualTo(403);
+    }
+
+    @Test
+    void accountantCannotDeactivateAccount() throws Exception {
+        String adminToken = loginAs(adminEmail, "Secret123!");
+        HttpResponse<String> createResponse = postJsonWithToken("/accounts", adminToken, Map.of(
+                "accountCode", "1020",
+                "name", "Supplies",
+                "accountType", "ASSET",
+                "status", "ACTIVE"
+        ));
+        Long accountId = objectMapper.readTree(createResponse.body()).get("id").asLong();
+
+        String accountantToken = loginAs(accountantEmail, "Secret123!");
+        HttpResponse<String> deactResponse = postJsonWithToken("/accounts/" + accountId + "/deactivate", accountantToken, Map.of());
+        assertThat(deactResponse.statusCode()).isEqualTo(403);
+    }
+
+    @Test
     void adminCanCreateAccount() throws Exception {
         String token = loginAs(adminEmail, "Secret123!");
         var claims = jwtService.parseClaims(token);
@@ -196,7 +246,7 @@ class Day2AuthenticationAndAccountTests {
     @Test
     void duplicateEmailAcrossOrganizationsIsRejectedAtInvitation() throws Exception {
         Organization org2 = new Organization();
-        org2.setName("Second Org");
+        org2.setName("Second Org " + UUID.randomUUID().toString().substring(0, 8));
         org2.setBaseCurrency("USD");
         org2 = organizationRepository.save(org2);
 
@@ -226,7 +276,7 @@ class Day2AuthenticationAndAccountTests {
         assertThat(response.statusCode()).isEqualTo(200);
         JsonNode body = objectMapper.readTree(response.body());
         assertThat(body.get("id").asLong()).isEqualTo(organization.getId());
-        assertThat(body.get("name").asText()).isEqualTo("Acme Org");
+        assertThat(body.get("name").asText()).isEqualTo(organizationName);
         assertThat(body.get("baseCurrency").asText()).isEqualTo("ETB");
         assertThat(body.has("createdAt")).isTrue();
         assertThat(body.toString()).doesNotContain("passwordHash");
@@ -322,7 +372,7 @@ class Day2AuthenticationAndAccountTests {
         JsonNode updateBody = objectMapper.readTree(updateResponse.body());
         assertThat(updateBody.get("name").asText()).isEqualTo(renamedOrg2Name);
 
-        assertThat(organizationRepository.findById(organization.getId()).orElseThrow().getName()).isEqualTo("Acme Org");
+        assertThat(organizationRepository.findById(organization.getId()).orElseThrow().getName()).isEqualTo(organizationName);
         assertThat(organizationRepository.findById(org2.getId()).orElseThrow().getName()).isEqualTo(renamedOrg2Name);
     }
 
@@ -330,7 +380,7 @@ class Day2AuthenticationAndAccountTests {
     void adminCanListOnlyUsersFromCurrentOrganizationInDeterministicOrder() throws Exception {
         LedgerUser otherOrgUser = new LedgerUser();
         Organization org2 = new Organization();
-        org2.setName("Outside Org");
+        org2.setName("Outside Org " + UUID.randomUUID().toString().substring(0, 8));
         org2.setBaseCurrency("USD");
         org2 = organizationRepository.save(org2);
         otherOrgUser.setOrganization(org2);
@@ -435,7 +485,7 @@ class Day2AuthenticationAndAccountTests {
     @Test
     void jwtCannotReadAnotherOrganizationsAccountById() throws Exception {
         Organization org2 = new Organization();
-        org2.setName("Another Org");
+        org2.setName("Another Org " + UUID.randomUUID().toString().substring(0, 8));
         org2.setBaseCurrency("ETB");
         org2 = organizationRepository.save(org2);
 

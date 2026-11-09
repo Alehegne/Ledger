@@ -45,8 +45,12 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health", "/auth/login", "/error").permitAll()
                         .requestMatchers(HttpMethod.POST, "/organizations").hasRole("ADMIN")
+                        .requestMatchers("/organizations/me", "/organizations/settings").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/users/invite").hasRole("ADMIN")
+                        .requestMatchers("/users/**", "/invitations", "/invitations/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/invitations/accept").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/audit-logs", "/api/audit-logs/**", "/audit-logs", "/audit-logs/**").hasRole("ADMIN")
+                        .requestMatchers("/accounts/**", "/journal-entries/**", "/api/reports/**", "/api/dashboard/**").hasAnyRole("ADMIN", "ACCOUNTANT", "VIEWER")
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(authenticationEntryPoint)

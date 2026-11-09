@@ -5,6 +5,7 @@ import com.example.Ledger.account.repository.AccountRepository;
 import com.example.Ledger.common.enums.AccountStatus;
 import com.example.Ledger.common.enums.AccountType;
 import com.example.Ledger.common.enums.Role;
+import com.example.Ledger.support.PostgresIntegrationTestSupport;
 import com.example.Ledger.organization.model.Organization;
 import com.example.Ledger.organization.repository.OrganizationRepository;
 import com.example.Ledger.user.model.LedgerUser;
@@ -37,7 +38,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class Day4ReportAndReversalTests {
+class Day4ReportAndReversalTests extends PostgresIntegrationTestSupport {
 
     @LocalServerPort
     private int port;
@@ -58,6 +59,7 @@ class Day4ReportAndReversalTests {
     private PasswordEncoder passwordEncoder;
 
     private Organization organization;
+    private LedgerUser admin;
     private LedgerUser accountant;
     private LedgerUser viewer;
     private Account asset;
@@ -76,6 +78,7 @@ class Day4ReportAndReversalTests {
         organization.setBaseCurrency("ETB");
         organization = organizationRepository.save(organization);
 
+        admin = createUser(organization, "admin." + suffix + "@test.local", Role.ADMIN);
         accountant = createUser(organization, "accountant." + suffix + "@test.local", Role.ACCOUNTANT);
         viewer = createUser(organization, "viewer." + suffix + "@test.local", Role.VIEWER);
 
@@ -643,14 +646,15 @@ class Day4ReportAndReversalTests {
     @Test
     void auditLogsRecordedForJournalOperations() throws Exception {
         String token = loginAs(accountant.getEmail(), PASSWORD);
+        String adminToken = loginAs(admin.getEmail(), PASSWORD);
 
         // Create entry
         Long entryId = createAndPostEntry(token, asset, expense, LocalDate.now(), new BigDecimal("100.00"), "Audit test");
 
-        // Query audit logs for this entry
+        // Query audit logs for this entry (ADMIN only)
         HttpResponse<String> response = getWithToken(
                 String.format("/api/audit-logs?entity=JOURNAL_ENTRY&page=0&size=50"),
-                token
+                adminToken
         );
 
         assertThat(response.statusCode()).isEqualTo(200);
@@ -675,14 +679,15 @@ class Day4ReportAndReversalTests {
     @Test
     void auditLogsFilterByAction() throws Exception {
         String token = loginAs(accountant.getEmail(), PASSWORD);
+        String adminToken = loginAs(admin.getEmail(), PASSWORD);
 
         createAndPostEntry(token, asset, expense, LocalDate.now(), new BigDecimal("100.00"), "Test 1");
         createAndPostEntry(token, asset, expense, LocalDate.now(), new BigDecimal("200.00"), "Test 2");
 
-        // Query for JOURNAL_POSTED actions
+        // Query for JOURNAL_POSTED actions (ADMIN only)
         HttpResponse<String> response = getWithToken(
                 String.format("/api/audit-logs?action=JOURNAL_POSTED&page=0&size=50"),
-                token
+                adminToken
         );
 
         assertThat(response.statusCode()).isEqualTo(200);
@@ -697,16 +702,17 @@ class Day4ReportAndReversalTests {
     @Test
     void auditLogsPagination() throws Exception {
         String token = loginAs(accountant.getEmail(), PASSWORD);
+        String adminToken = loginAs(admin.getEmail(), PASSWORD);
 
         // Create multiple entries to generate audit logs
         for (int i = 0; i < 25; i++) {
             createAndPostEntry(token, asset, expense, LocalDate.now(), new BigDecimal("10.00"), "Entry " + i);
         }
 
-        // Query first page
+        // Query first page (ADMIN only)
         HttpResponse<String> page1Response = getWithToken(
                 "/api/audit-logs?page=0&size=10",
-                token
+                adminToken
         );
 
         assertThat(page1Response.statusCode()).isEqualTo(200);
@@ -720,7 +726,7 @@ class Day4ReportAndReversalTests {
         // Query second page
         HttpResponse<String> page2Response = getWithToken(
                 "/api/audit-logs?page=1&size=10",
-                token
+                adminToken
         );
 
         assertThat(page2Response.statusCode()).isEqualTo(200);
@@ -732,12 +738,13 @@ class Day4ReportAndReversalTests {
     @Test
     void auditLogsOrganizationScoped() throws Exception {
         String token = loginAs(accountant.getEmail(), PASSWORD);
+        String adminToken = loginAs(admin.getEmail(), PASSWORD);
 
         createAndPostEntry(token, asset, expense, LocalDate.now(), new BigDecimal("100.00"), "Scoped test");
 
         HttpResponse<String> response = getWithToken(
                 "/api/audit-logs?page=0&size=100",
-                token
+                adminToken
         );
 
         assertThat(response.statusCode()).isEqualTo(200);

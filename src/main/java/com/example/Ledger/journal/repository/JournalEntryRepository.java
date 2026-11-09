@@ -25,6 +25,8 @@ public interface JournalEntryRepository extends JpaRepository<JournalEntry, Long
 
 		long countByOrganizationIdAndStatus(Long organizationId, JournalEntryStatus status);
 
+		boolean existsByOrganizationId(Long organizationId);
+
 		@Lock(LockModeType.PESSIMISTIC_WRITE)
 		@Query("""
 						select je

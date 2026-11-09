@@ -17,7 +17,7 @@ import java.time.LocalDate;
  * Provides access to audit history with filtering and pagination.
  */
 @RestController
-@RequestMapping("/api/audit-logs")
+@RequestMapping({"/api/audit-logs", "/audit-logs"})
 public class AuditLogController {
 
     private final AuditLogQueryService auditLogQueryService;
@@ -27,30 +27,13 @@ public class AuditLogController {
     }
 
     /**
-     * GET /api/audit-logs
+     * GET /api/audit-logs or /audit-logs
      *
      * Returns paginated audit log entries with optional filtering.
-     *
-     * Query Parameters:
-     * - actor (optional): Filter by actor user ID
-     * - action (optional): Filter by action type
-     * - entity (optional): Filter by entity type
-     * - fromDate (optional): Start date for filtering (inclusive), format: YYYY-MM-DD
-     * - toDate (optional): End date for filtering (inclusive), format: YYYY-MM-DD
-     * - page (optional, default: 0): Page number for pagination (0-indexed)
-     * - size (optional, default: 20): Page size (1-100)
-     *
-     * @param actor Optional actor user ID filter
-     * @param action Optional action filter
-     * @param entity Optional entity type filter
-     * @param fromDate Optional start date (inclusive)
-     * @param toDate Optional end date (inclusive)
-     * @param page Page number (0-indexed)
-     * @param size Page size
-     * @return Paginated audit log entries
+     * Organization-scoped audit trail.
      */
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'ACCOUNTANT', 'VIEWER')")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<AuditLogPageResponse> listAuditLogs(
             @RequestParam(required = false) Long actor,
             @RequestParam(required = false) String action,

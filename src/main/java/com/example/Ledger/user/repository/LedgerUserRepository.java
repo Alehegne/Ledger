@@ -1,5 +1,6 @@
 package com.example.Ledger.user.repository;
 
+import com.example.Ledger.common.enums.Role;
 import com.example.Ledger.user.model.LedgerUser;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -22,6 +23,10 @@ public interface LedgerUserRepository extends JpaRepository<LedgerUser, Long> {
     Optional<LedgerUser> findByOrganizationIdAndEmailIgnoreCase(Long organizationId, String email);
 
     boolean existsByOrganizationIdAndEmailIgnoreCase(Long organizationId, String email);
+
+    Optional<LedgerUser> findByIdAndOrganizationId(Long id, Long organizationId);
+
+    long countByOrganizationIdAndRole(Long organizationId, Role role);
 
     List<LedgerUser> findByOrganizationIdOrderByFullNameAscEmailAsc(Long organizationId);
 }

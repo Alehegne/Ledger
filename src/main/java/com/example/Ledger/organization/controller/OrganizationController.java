@@ -27,13 +27,13 @@ public class OrganizationController {
         return organizationService.createOrganization(request);
     }
 
-    @GetMapping("/organizations/me")
+    @GetMapping({"/organizations/me", "/organizations/settings"})
     @PreAuthorize("hasRole('ADMIN')")
     public OrganizationResponse getCurrentSettings() {
         return organizationService.getCurrentOrganizationSettings();
     }
 
-    @PatchMapping("/organizations/me")
+    @PatchMapping({"/organizations/me", "/organizations/settings"})
     @PreAuthorize("hasRole('ADMIN')")
     public OrganizationResponse updateCurrentSettings(@Valid @RequestBody OrganizationSettingsUpdateRequest request) {
         return organizationService.updateCurrentOrganizationSettings(request);

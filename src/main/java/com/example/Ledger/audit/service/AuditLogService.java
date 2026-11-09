@@ -4,6 +4,7 @@ import com.example.Ledger.audit.model.AuditLog;
 import com.example.Ledger.audit.repository.AuditLogRepository;
 import com.example.Ledger.common.enums.AuditLogAction;
 import com.example.Ledger.common.security.CurrentUserProvider;
+import com.example.Ledger.organization.model.Organization;
 import com.example.Ledger.organization.repository.OrganizationRepository;
 import com.example.Ledger.user.model.LedgerUser;
 import com.example.Ledger.user.repository.LedgerUserRepository;
@@ -45,6 +46,37 @@ public class AuditLogService {
         this.objectMapper = objectMapper;
     }
 
+    public void recordAudit(Organization organization, LedgerUser actorUser, String action, String entityType, String entityId, Map<?, ?> metadata) {
+        try {
+            String metadataJson = null;
+            if (metadata != null && !metadata.isEmpty()) {
+                try {
+                    metadataJson = objectMapper.writeValueAsString(metadata);
+                } catch (JsonProcessingException e) {
+                    logger.warn("Failed to serialize audit metadata", e);
+                    metadataJson = "{}";
+                }
+            }
+
+            AuditLog auditLog = new AuditLog();
+            auditLog.setOrganization(organization);
+            auditLog.setActorUser(actorUser);
+            auditLog.setAction(action);
+            auditLog.setEntityType(entityType);
+            auditLog.setEntityId(entityId);
+            auditLog.setMetadataJson(metadataJson);
+
+            auditLogRepository.save(auditLog);
+        } catch (Exception e) {
+            logger.error("Error recording audit log for action: {}, entity: {}:{}", action, entityType, entityId, e);
+            throw new RuntimeException("Audit logging failed", e);
+        }
+    }
+
+    public void recordAudit(Organization organization, LedgerUser actorUser, AuditLogAction action, String entityType, String entityId, Map<?, ?> metadata) {
+        recordAudit(organization, actorUser, action.toString(), entityType, entityId, metadata);
+    }
+
     /**
      * Records an audit event for the current user and organization.
      *
@@ -66,25 +98,7 @@ public class AuditLogService {
                 user = userRepository.findById(userId).orElse(null);
             }
 
-            String metadataJson = null;
-            if (metadata != null && !metadata.isEmpty()) {
-                try {
-                    metadataJson = objectMapper.writeValueAsString(metadata);
-                } catch (JsonProcessingException e) {
-                    logger.warn("Failed to serialize audit metadata", e);
-                    metadataJson = "{}";
-                }
-            }
-
-            AuditLog auditLog = new AuditLog();
-            auditLog.setOrganization(org);
-            auditLog.setActorUser(user);
-            auditLog.setAction(action);
-            auditLog.setEntityType(entityType);
-            auditLog.setEntityId(entityId);
-            auditLog.setMetadataJson(metadataJson);
-
-            auditLogRepository.save(auditLog);
+            recordAudit(org, user, action, entityType, entityId, metadata);
         } catch (Exception e) {
             logger.error("Error recording audit log for action: {}, entity: {}:{}", action, entityType, entityId, e);
             throw new RuntimeException("Audit logging failed", e);

@@ -13,4 +13,16 @@ public record InvitationResponse(
         Instant expiresAt,
         Instant createdAt
 ) {
+    @Override
+    public String toString() {
+        return "InvitationResponse[" +
+                "id=" + id +
+                ", organizationId=" + organizationId +
+                ", invitedEmail=" + invitedEmail +
+                ", role=" + role +
+                ", invitationToken=[REDACTED]" +
+                ", expiresAt=" + expiresAt +
+                ", createdAt=" + createdAt +
+                ']';
+    }
 }

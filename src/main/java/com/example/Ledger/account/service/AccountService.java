@@ -1,12 +1,14 @@
 package com.example.Ledger.account.service;
 
+import com.example.Ledger.account.dto.AccountBalanceResponse;
 import com.example.Ledger.account.dto.AccountRequest;
 import com.example.Ledger.account.dto.AccountResponse;
-import com.example.Ledger.account.dto.AccountBalanceResponse;
 import com.example.Ledger.account.dto.AccountUpdateRequest;
 import com.example.Ledger.account.model.Account;
 import com.example.Ledger.account.repository.AccountRepository;
+import com.example.Ledger.audit.service.AuditLogService;
 import com.example.Ledger.common.enums.AccountStatus;
+import com.example.Ledger.common.enums.AuditLogAction;
 import com.example.Ledger.common.enums.Role;
 import com.example.Ledger.common.exception.BusinessException;
 import com.example.Ledger.common.exception.ResourceNotFoundException;
@@ -20,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @Transactional
@@ -29,21 +32,24 @@ public class AccountService {
     private final OrganizationRepository organizationRepository;
     private final JournalLineRepository journalLineRepository;
     private final CurrentUserProvider currentUserProvider;
+    private final AuditLogService auditLogService;
 
     public AccountService(
             AccountRepository accountRepository,
             OrganizationRepository organizationRepository,
             JournalLineRepository journalLineRepository,
-            CurrentUserProvider currentUserProvider
+            CurrentUserProvider currentUserProvider,
+            AuditLogService auditLogService
     ) {
         this.accountRepository = accountRepository;
         this.organizationRepository = organizationRepository;
         this.journalLineRepository = journalLineRepository;
         this.currentUserProvider = currentUserProvider;
+        this.auditLogService = auditLogService;
     }
 
     public AccountResponse createAccount(AccountRequest request) {
-        currentUserProvider.requireRole(Role.ADMIN, Role.ACCOUNTANT);
+        currentUserProvider.requireRole(Role.ADMIN);
         Long organizationId = currentUserProvider.getCurrentOrganizationId();
 
         String accountCode = normalizeCode(request.accountCode());
@@ -66,6 +72,17 @@ public class AccountService {
         }
 
         account = accountRepository.save(account);
+        auditLogService.recordAudit(
+                AuditLogAction.ACCOUNT_CREATED,
+                "ACCOUNT",
+                account.getId().toString(),
+                Map.of(
+                        "accountCode", account.getAccountCode(),
+                        "name", account.getName(),
+                        "accountType", account.getAccountType().name(),
+                        "status", account.getStatus().name()
+                )
+        );
         return map(account);
     }
 
@@ -110,7 +127,7 @@ public class AccountService {
     }
 
     public AccountResponse updateAccount(Long accountId, AccountUpdateRequest request) {
-        currentUserProvider.requireRole(Role.ADMIN, Role.ACCOUNTANT);
+        currentUserProvider.requireRole(Role.ADMIN);
         Long organizationId = currentUserProvider.getCurrentOrganizationId();
 
         Account account = accountRepository.findByIdAndOrganizationId(accountId, organizationId)
@@ -147,11 +164,22 @@ public class AccountService {
         }
 
         account = accountRepository.save(account);
+        auditLogService.recordAudit(
+                AuditLogAction.ACCOUNT_UPDATED,
+                "ACCOUNT",
+                account.getId().toString(),
+                Map.of(
+                        "accountCode", account.getAccountCode(),
+                        "name", account.getName(),
+                        "accountType", account.getAccountType().name(),
+                        "status", account.getStatus().name()
+                )
+        );
         return map(account);
     }
 
     public AccountResponse deactivateAccount(Long accountId) {
-        currentUserProvider.requireRole(Role.ADMIN, Role.ACCOUNTANT);
+        currentUserProvider.requireRole(Role.ADMIN);
         Long organizationId = currentUserProvider.getCurrentOrganizationId();
 
         Account account = accountRepository.findByIdAndOrganizationId(accountId, organizationId)
@@ -159,6 +187,16 @@ public class AccountService {
 
         account.setStatus(AccountStatus.INACTIVE);
         account = accountRepository.save(account);
+        auditLogService.recordAudit(
+                AuditLogAction.ACCOUNT_DEACTIVATED,
+                "ACCOUNT",
+                account.getId().toString(),
+                Map.of(
+                        "accountCode", account.getAccountCode(),
+                        "name", account.getName(),
+                        "status", "INACTIVE"
+                )
+        );
         return map(account);
     }
 

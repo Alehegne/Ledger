@@ -7,6 +7,7 @@ import com.example.Ledger.account.dto.AccountUpdateRequest;
 import com.example.Ledger.account.service.AccountService;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -26,7 +27,7 @@ public class AccountController {
     }
 
     @PostMapping("/accounts")
-    @PreAuthorize("hasAnyRole('ADMIN','ACCOUNTANT')")
+    @PreAuthorize("hasRole('ADMIN')")
     public AccountResponse create(@Valid @RequestBody AccountRequest request) {
         return accountService.createAccount(request);
     }
@@ -50,14 +51,23 @@ public class AccountController {
     }
 
     @PatchMapping("/accounts/{accountId}")
-    @PreAuthorize("hasAnyRole('ADMIN','ACCOUNTANT')")
+    @PreAuthorize("hasRole('ADMIN')")
     public AccountResponse update(@PathVariable Long accountId, @RequestBody AccountUpdateRequest request) {
         return accountService.updateAccount(accountId, request);
     }
 
     @PostMapping("/accounts/{accountId}/deactivate")
-    @PreAuthorize("hasAnyRole('ADMIN','ACCOUNTANT')")
+    @PreAuthorize("hasRole('ADMIN')")
     public AccountResponse deactivate(@PathVariable Long accountId) {
         return accountService.deactivateAccount(accountId);
+    }
+
+    // delete 
+    @DeleteMapping("/accounts/{accountId}")
+    @PreAuthorize("hasAnyRole('ADMIN','ACCOUNTANT')")
+    public void delete(@PathVariable Long accountId) {
+        // accountService.deleteAccount(accountId);
+        return ;
+
     }
 }

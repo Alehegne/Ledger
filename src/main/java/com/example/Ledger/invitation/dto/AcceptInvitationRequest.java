@@ -17,4 +17,8 @@ public record AcceptInvitationRequest(
         @NotBlank(message = "Password is required")
         String password
 ) {
+    @Override
+    public String toString() {
+        return "AcceptInvitationRequest[token=[REDACTED], email=" + email + ", fullName=" + fullName + ", password=[REDACTED]]";
+    }
 }

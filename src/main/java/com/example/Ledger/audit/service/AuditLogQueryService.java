@@ -124,9 +124,22 @@ public class AuditLogQueryService {
      * Hides internal IDs and sensitive information.
      */
     private AuditLogResponse mapToResponse(AuditLog auditLog) {
+        String actorDisplay;
+        if (auditLog.getActorUser() != null) {
+            String fullName = auditLog.getActorUser().getFullName();
+            String email = auditLog.getActorUser().getEmail();
+            if (fullName != null && !fullName.isBlank()) {
+                actorDisplay = fullName + " (" + email + ")";
+            } else {
+                actorDisplay = email;
+            }
+        } else {
+            actorDisplay = "System";
+        }
+
         return new AuditLogResponse(
                 auditLog.getId(),
-                auditLog.getActorUser() != null ? auditLog.getActorUser().getId().toString() : "system",
+                actorDisplay,
                 auditLog.getAction(),
                 auditLog.getEntityType(),
                 auditLog.getEntityId(),

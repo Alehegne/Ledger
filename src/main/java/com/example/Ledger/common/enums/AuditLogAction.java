@@ -8,6 +8,10 @@ public enum AuditLogAction {
     // User/Organization events
     USER_INVITED,
     USER_CREATED,
+    INVITATION_REVOKED,
+    INVITATION_ACCEPTED,
+    USER_ROLE_UPDATED,
+    ORGANIZATION_SETTINGS_UPDATED,
 
     // Account events
     ACCOUNT_CREATED,
