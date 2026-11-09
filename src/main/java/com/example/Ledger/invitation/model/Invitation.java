@@ -1,5 +1,6 @@
 package com.example.Ledger.invitation.model;
 
+import com.example.Ledger.common.enums.InvitationPurpose;
 import com.example.Ledger.common.enums.Role;
 import com.example.Ledger.common.persistence.BaseEntity;
 import com.example.Ledger.organization.model.Organization;
@@ -50,6 +51,15 @@ public class Invitation extends BaseEntity {
     @Column(nullable = false, length = 20)
     private Role role;
 
+    @NotNull
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 30)
+    private InvitationPurpose purpose = InvitationPurpose.TEAM_INVITE;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "target_user_id")
+    private LedgerUser targetUser;
+
     @NotBlank
     @Size(max = 255)
     @Column(name = "invitation_token", nullable = false, length = 255)
@@ -61,6 +71,9 @@ public class Invitation extends BaseEntity {
 
     @Column(name = "accepted_at")
     private Instant acceptedAt;
+
+    @Column(name = "superseded_at")
+    private Instant supersededAt;
 
     public Organization getOrganization() {
         return organization;
@@ -94,6 +107,22 @@ public class Invitation extends BaseEntity {
         this.role = role;
     }
 
+    public InvitationPurpose getPurpose() {
+        return purpose;
+    }
+
+    public void setPurpose(InvitationPurpose purpose) {
+        this.purpose = purpose;
+    }
+
+    public LedgerUser getTargetUser() {
+        return targetUser;
+    }
+
+    public void setTargetUser(LedgerUser targetUser) {
+        this.targetUser = targetUser;
+    }
+
     public String getInvitationToken() {
         return invitationToken;
     }
@@ -116,5 +145,13 @@ public class Invitation extends BaseEntity {
 
     public void setAcceptedAt(Instant acceptedAt) {
         this.acceptedAt = acceptedAt;
+    }
+
+    public Instant getSupersededAt() {
+        return supersededAt;
+    }
+
+    public void setSupersededAt(Instant supersededAt) {
+        this.supersededAt = supersededAt;
     }
 }

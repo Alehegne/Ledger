@@ -4,7 +4,10 @@ import com.example.Ledger.account.model.Account;
 import com.example.Ledger.account.repository.AccountRepository;
 import com.example.Ledger.common.enums.AccountStatus;
 import com.example.Ledger.common.enums.AccountType;
+import com.example.Ledger.common.enums.OrganizationKind;
+import com.example.Ledger.common.enums.OrganizationStatus;
 import com.example.Ledger.common.enums.Role;
+import com.example.Ledger.common.enums.UserStatus;
 import com.example.Ledger.organization.model.Organization;
 import com.example.Ledger.organization.repository.OrganizationRepository;
 import com.example.Ledger.user.model.LedgerUser;
@@ -91,6 +94,9 @@ public class LocalDevelopmentSeedService {
         final String seedCurrencyCode = normalizedCurrency;
 
         Organization organization = resolveSeedOrganization(seedOrganizationName, seedCurrencyCode);
+        if (organization.getKind() == OrganizationKind.PLATFORM) {
+            throw new IllegalStateException("Cannot run tenant development seed against PLATFORM organization");
+        }
 
         ensureUser(organization, adminEmail, Role.ADMIN, adminPassword, "System Administrator");
         ensureUser(organization, accountantEmail, Role.ACCOUNTANT, accountantPassword, "Finance Accountant");
@@ -142,6 +148,8 @@ public class LocalDevelopmentSeedService {
         Organization created = new Organization();
         created.setName(name.trim());
         created.setBaseCurrency(currencyCode);
+        created.setKind(OrganizationKind.TENANT);
+        created.setStatus(OrganizationStatus.ACTIVE);
         return organizationRepository.save(created);
     }
 
@@ -193,6 +201,7 @@ public class LocalDevelopmentSeedService {
         created.setPasswordHash(passwordEncoder.encode(password));
         created.setFullName(fullName);
         created.setRole(role);
+        created.setStatus(UserStatus.ACTIVE);
 
         try {
             userRepository.save(created);

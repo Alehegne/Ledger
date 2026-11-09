@@ -48,6 +48,24 @@ const navItems: Array<{
   { to: "/users", label: "Users", icon: Users, roles: ["ADMIN"] },
   { to: "/audit", label: "Audit Logs", icon: History, roles: ["ADMIN"] },
   { to: "/settings", label: "Settings", icon: ShieldCheck, roles: ["ADMIN"] },
+  {
+    to: "/admin/overview",
+    label: "Platform Overview",
+    icon: BarChart3,
+    roles: ["SUPER_ADMIN"],
+  },
+  {
+    to: "/admin/organizations",
+    label: "Organizations",
+    icon: Building2,
+    roles: ["SUPER_ADMIN"],
+  },
+  {
+    to: "/admin/audit",
+    label: "Platform Audit",
+    icon: History,
+    roles: ["SUPER_ADMIN"],
+  },
 ];
 
 export const AppShell = ({ children }: { children: ReactNode }) => {
@@ -55,7 +73,10 @@ export const AppShell = ({ children }: { children: ReactNode }) => {
   const service = useContext(ServiceContext);
   const navigate = useNavigate();
   const userRole = session?.user.role ?? "VIEWER";
-  const organizationName = session?.user.organizationName ?? "Northstar Co.";
+  const isPlatformAdmin = userRole === "SUPER_ADMIN";
+  const organizationName =
+    session?.user.organizationName ??
+    (isPlatformAdmin ? "Ledger Platform" : "Northstar Co.");
   const sessionBadge = env.mode === "api" ? null : session ? "mock" : "demo";
   const visibleNavItems = navItems.filter(({ roles }) =>
     roles.includes(userRole),
@@ -96,7 +117,7 @@ export const AppShell = ({ children }: { children: ReactNode }) => {
               <NavLink
                 key={to}
                 to={to}
-                end={to === "/"}
+                end={to === "/" || to === "/admin/overview"}
                 aria-label={`Navigate to ${label}`}
                 className={({ isActive }) =>
                   `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
@@ -135,10 +156,14 @@ export const AppShell = ({ children }: { children: ReactNode }) => {
             <div className="flex items-center justify-between px-4 py-4 sm:px-5">
               <div>
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                  Finance workspace
+                  {isPlatformAdmin
+                    ? "Platform control plane"
+                    : "Finance workspace"}
                 </p>
                 <h1 className="text-xl font-semibold text-slate-900">
-                  Accounting overview
+                  {isPlatformAdmin
+                    ? "Organization governance"
+                    : "Accounting overview"}
                 </h1>
               </div>
 
@@ -168,7 +193,7 @@ export const AppShell = ({ children }: { children: ReactNode }) => {
                 <NavLink
                   key={`mobile-${to}`}
                   to={to}
-                  end={to === "/"}
+                  end={to === "/" || to === "/admin/overview"}
                   aria-label={`Navigate to ${label}`}
                   className={({ isActive }) =>
                     `inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition ${

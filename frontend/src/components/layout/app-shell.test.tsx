@@ -132,4 +132,36 @@ describe("app shell mode indicators", () => {
     expect(localStorage.getItem("ledger.frontend.auth.session")).toBeNull();
   });
 
+  it("shows platform governance navigation for SUPER_ADMIN and hides tenant workspace items", () => {
+    env.mode = "api";
+    renderShell({
+      token: "super-token",
+      expiresAt: "2099-12-31T23:59:59Z",
+      user: {
+        id: 1,
+        email: "super@platform.ledger",
+        fullName: "Platform Root Admin",
+        role: "SUPER_ADMIN",
+        organizationId: 3,
+      },
+    });
+
+    expect(screen.getByText("Ledger Platform")).toBeInTheDocument();
+    expect(screen.getByText(/platform control plane/i)).toBeInTheDocument();
+    expect(screen.getByText(/organization governance/i)).toBeInTheDocument();
+    expect(screen.getAllByText("Platform Overview").length).toBeGreaterThanOrEqual(
+      1,
+    );
+    expect(screen.getAllByText("Organizations").length).toBeGreaterThanOrEqual(
+      1,
+    );
+    expect(screen.getAllByText("Platform Audit").length).toBeGreaterThanOrEqual(
+      1,
+    );
+
+    expect(screen.queryByText("Accounts")).not.toBeInTheDocument();
+    expect(screen.queryByText("Journal")).not.toBeInTheDocument();
+    expect(screen.queryByText("Reports")).not.toBeInTheDocument();
+    expect(screen.queryByText("Audit Logs")).not.toBeInTheDocument();
+  });
 });

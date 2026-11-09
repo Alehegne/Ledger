@@ -787,4 +787,189 @@ describe("api service foundational mapping", () => {
     ]);
   });
 
+  it("maps SUPER_ADMIN login and platform governance endpoints accurately", async () => {
+    const calls: Array<{ path: string; method?: string; body?: string }> = [];
+    const http = vi.fn<ApiHttp>(async (path, init) => {
+      calls.push({
+        path,
+        method: init?.method,
+        body: typeof init?.body === "string" ? init.body : undefined,
+      });
+
+      if (path === "/auth/login") {
+        return {
+          token: "super-jwt",
+          expiresAt: "2026-11-10T12:00:00Z",
+          user: {
+            id: 1,
+            email: "super@platform.ledger",
+            fullName: "Platform Super Admin",
+            role: "SUPER_ADMIN",
+            organizationId: 3,
+            organizationName: "Ledger Platform",
+          },
+        };
+      }
+
+      if (path.startsWith("/admin/organizations?")) {
+        return {
+          page: 0,
+          size: 15,
+          totalElements: 1,
+          totalPages: 1,
+          items: [
+            {
+              id: 42,
+              name: "Northstar Co.",
+              baseCurrency: "USD",
+              status: "ACTIVE",
+              userCount: 4,
+              activeAdminCount: 1,
+              disabledUserCount: 0,
+              accountCount: 6,
+              postedEntryCount: 12,
+              draftEntryCount: 1,
+              pendingInvitationCount: 0,
+              lastActivityAt: "2026-11-09T10:00:00Z",
+              createdAt: "2026-10-01T00:00:00Z",
+              suspendedAt: null,
+              suspendedReason: null,
+            },
+          ],
+        };
+      }
+
+      if (path === "/admin/organizations" && init?.method === "POST") {
+        return {
+          organizationId: 99,
+          organizationName: "Beacon Fintech",
+          baseCurrency: "EUR",
+          status: "PENDING",
+          invitationId: 500,
+          invitedAdminEmail: "founder@beacon.test",
+          invitationToken: "onetime-token-abc",
+          invitationExpiresAt: "2026-11-16T00:00:00Z",
+          createdAt: "2026-11-09T12:00:00Z",
+        };
+      }
+
+      if (path === "/admin/organizations/42/status" && init?.method === "PATCH") {
+        return {
+          id: 42,
+          name: "Northstar Co.",
+          baseCurrency: "USD",
+          kind: "TENANT",
+          status: "SUSPENDED",
+          suspendedAt: "2026-11-09T12:05:00Z",
+          suspendedReason: "Billing overdue",
+          userCount: 4,
+          activeUserCount: 4,
+          disabledUserCount: 0,
+          activeAdminCount: 1,
+          accountCount: 6,
+          postedEntryCount: 12,
+          draftEntryCount: 1,
+          hasTransactions: true,
+          trialBalanceBalanced: true,
+          pendingInvitations: [],
+          createdAt: "2026-10-01T00:00:00Z",
+          updatedAt: "2026-11-09T12:05:00Z",
+        };
+      }
+
+      if (
+        path === "/admin/organizations/42/recovery-invitation" &&
+        init?.method === "POST"
+      ) {
+        return {
+          invitationId: 501,
+          organizationId: 42,
+          invitedEmail: "recover@northstar.co",
+          role: "ADMIN",
+          purpose: "ADMIN_RECOVERY",
+          targetUserId: 10,
+          invitationToken: "recovery-token-xyz",
+          expiresAt: "2026-11-16T00:00:00Z",
+          createdAt: "2026-11-09T12:10:00Z",
+        };
+      }
+
+      if (path.startsWith("/admin/audit-logs?")) {
+        return {
+          page: 0,
+          size: 20,
+          totalElements: 1,
+          totalPages: 1,
+          items: [
+            {
+              id: 700,
+              actor: "Platform Super Admin (super@platform.ledger)",
+              action: "ORGANIZATION_SUSPENDED",
+              targetOrganizationId: 42,
+              targetOrganizationName: "Northstar Co.",
+              targetUserId: null,
+              targetUserEmail: null,
+              createdAt: "2026-11-09T12:05:00Z",
+              metadata: '{"reason":"Billing overdue"}',
+            },
+          ],
+        };
+      }
+
+      throw new Error(`Unexpected path: ${path}`);
+    });
+
+    const service = createApiService(http, adminSession);
+
+    const loginSession = await service.login("super@platform.ledger", "Pass!");
+    expect(loginSession.user.role).toBe("SUPER_ADMIN");
+    expect(loginSession.user.organizationName).toBe("Ledger Platform");
+
+    const orgPage = await service.listPlatformOrganizations({
+      page: 1,
+      size: 15,
+      status: "ACTIVE",
+      search: "North",
+    });
+    expect(orgPage.page).toBe(1);
+    expect(orgPage.items[0].name).toBe("Northstar Co.");
+    expect(calls.at(-1)?.path).toBe(
+      "/admin/organizations?search=North&status=ACTIVE&page=0&size=15",
+    );
+
+    const createdOrg = await service.createPlatformOrganization({
+      organizationName: "Beacon Fintech",
+      baseCurrency: "EUR",
+      adminEmail: "founder@beacon.test",
+    });
+    expect(createdOrg.status).toBe("PENDING");
+    expect(createdOrg.invitationToken).toBe("onetime-token-abc");
+
+    const updatedDetail = await service.updatePlatformOrganizationStatus(42, {
+      status: "SUSPENDED",
+      reason: "Billing overdue",
+    });
+    expect(updatedDetail.status).toBe("SUSPENDED");
+    expect(updatedDetail.suspendedReason).toBe("Billing overdue");
+
+    const recovery = await service.createAdminRecoveryInvitation(42, {
+      adminEmail: "recover@northstar.co",
+    });
+    expect(recovery.targetUserId).toBe(10);
+    expect(recovery.purpose).toBe("ADMIN_RECOVERY");
+
+    const auditPage = await service.listPlatformAuditLogs({
+      page: 1,
+      size: 20,
+      action: "ORGANIZATION_SUSPENDED",
+      targetOrganizationId: 42,
+      fromDate: "2026-11-01",
+      toDate: "2026-11-09",
+    });
+    expect(auditPage.page).toBe(1);
+    expect(auditPage.items[0].action).toBe("ORGANIZATION_SUSPENDED");
+    expect(calls.at(-1)?.path).toBe(
+      "/admin/audit-logs?action=ORGANIZATION_SUSPENDED&targetOrganizationId=42&from=2026-11-01&to=2026-11-09&page=0&size=20",
+    );
+  });
 });

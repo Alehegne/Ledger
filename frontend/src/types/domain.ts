@@ -1,4 +1,8 @@
-export type Role = "ADMIN" | "ACCOUNTANT" | "VIEWER";
+export type Role = "ADMIN" | "ACCOUNTANT" | "VIEWER" | "SUPER_ADMIN";
+export type OrganizationKind = "PLATFORM" | "TENANT";
+export type OrganizationStatus = "PENDING" | "ACTIVE" | "SUSPENDED";
+export type UserStatus = "ACTIVE" | "DISABLED";
+export type InvitationPurpose = "ONBOARDING" | "TEAM_INVITE" | "ADMIN_RECOVERY";
 export type AccountType =
   | "ASSET"
   | "LIABILITY"
@@ -175,6 +179,112 @@ export interface OrganizationUser {
   email: string;
   fullName: string;
   role: Role;
-  invitationStatus: "ACTIVE" | "PENDING" | "UNKNOWN";
+  invitationStatus: "ACTIVE" | "DISABLED" | "PENDING" | "UNKNOWN";
 }
 
+export interface PlatformOverview {
+  totalTenantOrganizations: number;
+  activeTenantOrganizations: number;
+  pendingTenantOrganizations: number;
+  suspendedTenantOrganizations: number;
+  totalTenantUsers: number;
+  disabledTenantUsers: number;
+  totalTenantAccounts: number;
+  totalPostedJournalEntries: number;
+  unbalancedTenantOrganizations: number;
+  lastPlatformActionAt: string | null;
+}
+
+export interface PlatformOrganizationSummary {
+  id: number;
+  name: string;
+  baseCurrency: string;
+  status: OrganizationStatus;
+  userCount: number;
+  activeAdminCount: number;
+  disabledUserCount: number;
+  accountCount: number;
+  postedEntryCount: number;
+  draftEntryCount: number;
+  pendingInvitationCount: number;
+  lastActivityAt: string | null;
+  createdAt: string;
+  suspendedAt: string | null;
+  suspendedReason: string | null;
+}
+
+export interface PlatformPendingInvitationSummary {
+  id: number;
+  invitedEmail: string;
+  role: Role;
+  purpose: InvitationPurpose;
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface PlatformOrganizationDetail {
+  id: number;
+  name: string;
+  baseCurrency: string;
+  kind: OrganizationKind;
+  status: OrganizationStatus;
+  suspendedAt: string | null;
+  suspendedReason: string | null;
+  userCount: number;
+  activeUserCount: number;
+  disabledUserCount: number;
+  activeAdminCount: number;
+  accountCount: number;
+  postedEntryCount: number;
+  draftEntryCount: number;
+  hasTransactions: boolean;
+  trialBalanceBalanced: boolean;
+  pendingInvitations: PlatformPendingInvitationSummary[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminCreateOrganizationResult {
+  organizationId: number;
+  organizationName: string;
+  baseCurrency: string;
+  status: OrganizationStatus;
+  invitationId: number;
+  invitedAdminEmail: string;
+  invitationToken: string;
+  invitationExpiresAt: string;
+  createdAt: string;
+}
+
+export interface PlatformOrganizationUser {
+  id: number;
+  email: string;
+  fullName: string;
+  role: Role;
+  status: UserStatus;
+  createdAt: string;
+}
+
+export interface RecoveryInvitationResult {
+  invitationId: number;
+  organizationId: number;
+  invitedEmail: string;
+  role: Role;
+  purpose: InvitationPurpose;
+  targetUserId: number | null;
+  invitationToken: string;
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface PlatformAuditLogItem {
+  id: number;
+  actor: string;
+  action: string;
+  targetOrganizationId: number | null;
+  targetOrganizationName: string | null;
+  targetUserId: number | null;
+  targetUserEmail: string | null;
+  createdAt: string;
+  metadata: string;
+}

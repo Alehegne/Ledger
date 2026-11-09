@@ -5,6 +5,8 @@ import com.example.Ledger.account.repository.AccountRepository;
 import com.example.Ledger.audit.repository.AuditLogRepository;
 import com.example.Ledger.common.enums.AccountStatus;
 import com.example.Ledger.common.enums.AccountType;
+import com.example.Ledger.common.enums.OrganizationKind;
+import com.example.Ledger.common.enums.OrganizationStatus;
 import com.example.Ledger.common.enums.Role;
 import com.example.Ledger.common.security.JwtService;
 import com.example.Ledger.invitation.repository.InvitationRepository;
@@ -270,6 +272,125 @@ class AuditAndUserGovernanceIntegrationTest extends PostgresIntegrationTestSuppo
                 HttpResponse.BodyHandlers.ofString()
         );
         assertThat(demotePrimaryRes.statusCode()).isEqualTo(200);
+    }
+
+    @Test
+    void platformSuperAdminCanProvisionNewOrganization() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String orgName = "Fintech Startup " + suffix;
+        String email = "founder." + suffix + "@fintech.test";
+        String superAdminEmail = "superadmin." + suffix + "@platform.test";
+
+        Organization platformOrg = new Organization();
+        platformOrg.setName("Platform Operations " + suffix);
+        platformOrg.setBaseCurrency("USD");
+        platformOrg.setKind(OrganizationKind.PLATFORM);
+        platformOrg.setStatus(OrganizationStatus.ACTIVE);
+        platformOrg = organizationRepository.save(platformOrg);
+        LedgerUser superAdmin = createUser(platformOrg, superAdminEmail, "Platform Super Admin", Role.SUPER_ADMIN);
+        String superAdminToken = jwtService.generateToken(superAdmin);
+
+        // 1. Provision organization invite-first via platform super-admin-only endpoint
+        HttpResponse<String> registerRes = httpClient.send(
+                HttpRequest.newBuilder()
+                        .uri(URI.create(baseUrl() + "/admin/organizations"))
+                        .header("Authorization", "Bearer " + superAdminToken)
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(Map.of(
+                                "organizationName", orgName,
+                                "baseCurrency", "EUR",
+                                "adminEmail", email
+                        ))))
+                        .build(),
+                HttpResponse.BodyHandlers.ofString()
+        );
+        assertThat(registerRes.statusCode()).isEqualTo(201);
+        JsonNode registerNode = objectMapper.readTree(registerRes.body());
+        assertThat(registerNode.get("organizationName").asText()).isEqualTo(orgName);
+        assertThat(registerNode.get("baseCurrency").asText()).isEqualTo("EUR");
+        assertThat(registerNode.get("status").asText()).isEqualTo("PENDING");
+        assertThat(registerNode.get("invitedAdminEmail").asText()).isEqualTo(email);
+        String onboardingToken = registerNode.get("invitationToken").asText();
+        assertThat(onboardingToken).isNotBlank();
+        assertThat(userRepository.findAllByEmailIgnoreCase(email)).isEmpty();
+
+        // 2. Invited administrator completes onboarding via /invitations/accept
+        HttpResponse<String> acceptRes = httpClient.send(
+                HttpRequest.newBuilder()
+                        .uri(URI.create(baseUrl() + "/invitations/accept"))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(Map.of(
+                                "token", onboardingToken,
+                                "email", email,
+                                "fullName", "Jane Founder",
+                                "password", "FounderPass123!"
+                        ))))
+                        .build(),
+                HttpResponse.BodyHandlers.ofString()
+        );
+        assertThat(acceptRes.statusCode()).isEqualTo(200);
+
+        // 3. Log in as the newly onboarded tenant ADMIN -> standard CoA was automatically seeded
+        HttpResponse<String> loginRes = httpClient.send(
+                HttpRequest.newBuilder()
+                        .uri(URI.create(baseUrl() + "/auth/login"))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(Map.of(
+                                "email", email,
+                                "password", "FounderPass123!"
+                        ))))
+                        .build(),
+                HttpResponse.BodyHandlers.ofString()
+        );
+        assertThat(loginRes.statusCode()).isEqualTo(200);
+        String createdAdminToken = objectMapper.readTree(loginRes.body()).get("token").asText();
+
+        HttpResponse<String> accountsRes = httpClient.send(
+                HttpRequest.newBuilder()
+                        .uri(URI.create(baseUrl() + "/accounts"))
+                        .header("Authorization", "Bearer " + createdAdminToken)
+                        .GET()
+                        .build(),
+                HttpResponse.BodyHandlers.ofString()
+        );
+        assertThat(accountsRes.statusCode()).isEqualTo(200);
+        JsonNode accountsArray = objectMapper.readTree(accountsRes.body());
+        assertThat(accountsArray.size()).isEqualTo(6);
+
+        // 4. Query tenant audit logs -> verify INVITATION_ACCEPTED and ORGANIZATION_ACTIVATED, without exposing superAdmin email
+        HttpResponse<String> auditRes = httpClient.send(
+                HttpRequest.newBuilder()
+                        .uri(URI.create(baseUrl() + "/api/audit-logs"))
+                        .header("Authorization", "Bearer " + createdAdminToken)
+                        .GET()
+                        .build(),
+                HttpResponse.BodyHandlers.ofString()
+        );
+        assertThat(auditRes.statusCode()).isEqualTo(200);
+        assertThat(auditRes.body()).doesNotContain(superAdminEmail);
+        JsonNode auditPage = objectMapper.readTree(auditRes.body());
+        boolean foundAcceptedEvent = false;
+        boolean foundActivatedEvent = false;
+        for (JsonNode item : auditPage.get("items")) {
+            String action = item.get("action").asText();
+            if ("INVITATION_ACCEPTED".equals(action)) foundAcceptedEvent = true;
+            if ("ORGANIZATION_ACTIVATED".equals(action)) foundActivatedEvent = true;
+        }
+        assertThat(foundAcceptedEvent).isTrue();
+        assertThat(foundActivatedEvent).isTrue();
+
+        // 5. Query platform audit logs -> verify ORGANIZATION_CREATED recorded without raw token exposure
+        HttpResponse<String> platformAuditRes = httpClient.send(
+                HttpRequest.newBuilder()
+                        .uri(URI.create(baseUrl() + "/admin/audit-logs?action=ORGANIZATION_CREATED"))
+                        .header("Authorization", "Bearer " + superAdminToken)
+                        .GET()
+                        .build(),
+                HttpResponse.BodyHandlers.ofString()
+        );
+        assertThat(platformAuditRes.statusCode()).isEqualTo(200);
+        assertThat(platformAuditRes.body()).contains(orgName);
+        assertThat(platformAuditRes.body()).doesNotContain(onboardingToken);
     }
 
     @Test

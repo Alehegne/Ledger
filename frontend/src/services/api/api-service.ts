@@ -1,23 +1,37 @@
 import type {
   Account,
   AccountBalance,
+  AdminCreateOrganizationResult,
   AuditLogItem,
   AuthSession,
   GeneralLedgerReport,
   Invitation,
+  InvitationPurpose,
   JournalEntry,
+  OrganizationKind,
   OrganizationSettings,
+  OrganizationStatus,
   OrganizationUser,
   OverviewSnapshot,
   PageResult,
+  PlatformAuditLogItem,
+  PlatformOrganizationDetail,
+  PlatformOrganizationSummary,
+  PlatformOrganizationUser,
+  PlatformOverview,
+  PlatformPendingInvitationSummary,
+  RecoveryInvitationResult,
   Role,
   TrialBalanceReport,
+  UserStatus,
 } from "../../types/domain";
 import { UnsupportedInApiModeError } from "../../lib/errors";
 import type {
   LedgerService,
   ListAuditInput,
   ListJournalEntriesInput,
+  ListPlatformAuditInput,
+  ListPlatformOrganizationsInput,
 } from "../interfaces/ledger-service";
 
 export type ApiHttp = (
@@ -322,7 +336,7 @@ const mapOrganizationUser = (value: unknown): OrganizationUser => {
   }
 
   const validRoles = ["ADMIN", "ACCOUNTANT", "VIEWER"] as const;
-  const validStatuses = ["ACTIVE", "PENDING", "UNKNOWN"] as const;
+  const validStatuses = ["ACTIVE", "DISABLED", "PENDING", "UNKNOWN"] as const;
 
   if (typeof value.id !== "number" || !Number.isFinite(value.id)) {
     throw new Error("Invalid organization user response: missing id.");
@@ -938,7 +952,7 @@ export const mapLoginResponse = (value: unknown): AuthSession => {
     throw new Error("Invalid login response: missing user fullName.");
   }
 
-  const validRoles = ["ADMIN", "ACCOUNTANT", "VIEWER"] as const;
+  const validRoles = ["ADMIN", "ACCOUNTANT", "VIEWER", "SUPER_ADMIN"] as const;
   if (
     typeof role !== "string" ||
     !validRoles.includes(role as (typeof validRoles)[number])
@@ -964,6 +978,299 @@ export const mapLoginResponse = (value: unknown): AuthSession => {
       ...(organizationName ? { organizationName } : {}),
       ...(baseCurrency ? { baseCurrency } : {}),
     },
+  };
+};
+
+const VALID_ORG_STATUSES: readonly OrganizationStatus[] = [
+  "PENDING",
+  "ACTIVE",
+  "SUSPENDED",
+];
+const VALID_ORG_KINDS: readonly OrganizationKind[] = ["PLATFORM", "TENANT"];
+const VALID_USER_STATUSES: readonly UserStatus[] = ["ACTIVE", "DISABLED"];
+const VALID_ALL_ROLES: readonly Role[] = [
+  "ADMIN",
+  "ACCOUNTANT",
+  "VIEWER",
+  "SUPER_ADMIN",
+];
+const VALID_INVITE_PURPOSES: readonly InvitationPurpose[] = [
+  "ONBOARDING",
+  "TEAM_INVITE",
+  "ADMIN_RECOVERY",
+];
+
+const requireNumberField = (
+  obj: Record<string, unknown>,
+  field: string,
+  context: string,
+): number => {
+  const val = obj[field];
+  if (typeof val !== "number" || !Number.isFinite(val)) {
+    throw new Error(`Invalid ${context}: missing or invalid ${field}.`);
+  }
+  return val;
+};
+
+const requireStringField = (
+  obj: Record<string, unknown>,
+  field: string,
+  context: string,
+): string => {
+  const val = obj[field];
+  if (typeof val !== "string" || val.trim().length === 0) {
+    throw new Error(`Invalid ${context}: missing ${field}.`);
+  }
+  return val;
+};
+
+const optionalStringField = (
+  obj: Record<string, unknown>,
+  field: string,
+): string | null => {
+  const val = obj[field];
+  return typeof val === "string" && val.length > 0 ? val : null;
+};
+
+const optionalNumberField = (
+  obj: Record<string, unknown>,
+  field: string,
+): number | null => {
+  const val = obj[field];
+  return typeof val === "number" && Number.isFinite(val) ? val : null;
+};
+
+const requireEnumField = <T extends string>(
+  obj: Record<string, unknown>,
+  field: string,
+  allowed: readonly T[],
+  context: string,
+): T => {
+  const val = obj[field];
+  if (typeof val !== "string" || !allowed.includes(val as T)) {
+    throw new Error(`Invalid ${context}: missing or invalid ${field}.`);
+  }
+  return val as T;
+};
+
+const mapPlatformOverview = (value: unknown): PlatformOverview => {
+  if (!isPlainObject(value)) {
+    throw new Error("Invalid platform overview response: expected an object.");
+  }
+  const ctx = "platform overview response";
+  return {
+    totalTenantOrganizations: requireNumberField(
+      value,
+      "totalTenantOrganizations",
+      ctx,
+    ),
+    activeTenantOrganizations: requireNumberField(
+      value,
+      "activeTenantOrganizations",
+      ctx,
+    ),
+    pendingTenantOrganizations: requireNumberField(
+      value,
+      "pendingTenantOrganizations",
+      ctx,
+    ),
+    suspendedTenantOrganizations: requireNumberField(
+      value,
+      "suspendedTenantOrganizations",
+      ctx,
+    ),
+    totalTenantUsers: requireNumberField(value, "totalTenantUsers", ctx),
+    disabledTenantUsers: requireNumberField(value, "disabledTenantUsers", ctx),
+    totalTenantAccounts: requireNumberField(value, "totalTenantAccounts", ctx),
+    totalPostedJournalEntries: requireNumberField(
+      value,
+      "totalPostedJournalEntries",
+      ctx,
+    ),
+    unbalancedTenantOrganizations: requireNumberField(
+      value,
+      "unbalancedTenantOrganizations",
+      ctx,
+    ),
+    lastPlatformActionAt: optionalStringField(value, "lastPlatformActionAt"),
+  };
+};
+
+const mapPlatformOrganizationSummary = (
+  value: unknown,
+): PlatformOrganizationSummary => {
+  if (!isPlainObject(value)) {
+    throw new Error(
+      "Invalid platform organization summary: expected an object.",
+    );
+  }
+  const ctx = "platform organization summary";
+  return {
+    id: requireNumberField(value, "id", ctx),
+    name: requireStringField(value, "name", ctx),
+    baseCurrency: requireStringField(value, "baseCurrency", ctx),
+    status: requireEnumField(value, "status", VALID_ORG_STATUSES, ctx),
+    userCount: requireNumberField(value, "userCount", ctx),
+    activeAdminCount: requireNumberField(value, "activeAdminCount", ctx),
+    disabledUserCount: requireNumberField(value, "disabledUserCount", ctx),
+    accountCount: requireNumberField(value, "accountCount", ctx),
+    postedEntryCount: requireNumberField(value, "postedEntryCount", ctx),
+    draftEntryCount: requireNumberField(value, "draftEntryCount", ctx),
+    pendingInvitationCount: requireNumberField(
+      value,
+      "pendingInvitationCount",
+      ctx,
+    ),
+    lastActivityAt: optionalStringField(value, "lastActivityAt"),
+    createdAt: requireStringField(value, "createdAt", ctx),
+    suspendedAt: optionalStringField(value, "suspendedAt"),
+    suspendedReason: optionalStringField(value, "suspendedReason"),
+  };
+};
+
+const mapPlatformPendingInvitation = (
+  value: unknown,
+): PlatformPendingInvitationSummary => {
+  if (!isPlainObject(value)) {
+    throw new Error(
+      "Invalid platform pending invitation: expected an object.",
+    );
+  }
+  const ctx = "platform pending invitation";
+  return {
+    id: requireNumberField(value, "id", ctx),
+    invitedEmail: requireStringField(value, "invitedEmail", ctx),
+    role: requireEnumField(value, "role", VALID_ALL_ROLES, ctx),
+    purpose: requireEnumField(value, "purpose", VALID_INVITE_PURPOSES, ctx),
+    expiresAt: requireStringField(value, "expiresAt", ctx),
+    createdAt: requireStringField(value, "createdAt", ctx),
+  };
+};
+
+const mapPlatformOrganizationDetail = (
+  value: unknown,
+): PlatformOrganizationDetail => {
+  if (!isPlainObject(value)) {
+    throw new Error(
+      "Invalid platform organization detail: expected an object.",
+    );
+  }
+  const ctx = "platform organization detail";
+  if (
+    typeof value.hasTransactions !== "boolean" ||
+    typeof value.trialBalanceBalanced !== "boolean"
+  ) {
+    throw new Error(`Invalid ${ctx}: missing boolean flags.`);
+  }
+  if (!Array.isArray(value.pendingInvitations)) {
+    throw new Error(`Invalid ${ctx}: pendingInvitations must be an array.`);
+  }
+  return {
+    id: requireNumberField(value, "id", ctx),
+    name: requireStringField(value, "name", ctx),
+    baseCurrency: requireStringField(value, "baseCurrency", ctx),
+    kind: requireEnumField(value, "kind", VALID_ORG_KINDS, ctx),
+    status: requireEnumField(value, "status", VALID_ORG_STATUSES, ctx),
+    suspendedAt: optionalStringField(value, "suspendedAt"),
+    suspendedReason: optionalStringField(value, "suspendedReason"),
+    userCount: requireNumberField(value, "userCount", ctx),
+    activeUserCount: requireNumberField(value, "activeUserCount", ctx),
+    disabledUserCount: requireNumberField(value, "disabledUserCount", ctx),
+    activeAdminCount: requireNumberField(value, "activeAdminCount", ctx),
+    accountCount: requireNumberField(value, "accountCount", ctx),
+    postedEntryCount: requireNumberField(value, "postedEntryCount", ctx),
+    draftEntryCount: requireNumberField(value, "draftEntryCount", ctx),
+    hasTransactions: value.hasTransactions,
+    trialBalanceBalanced: value.trialBalanceBalanced,
+    pendingInvitations: value.pendingInvitations.map(
+      mapPlatformPendingInvitation,
+    ),
+    createdAt: requireStringField(value, "createdAt", ctx),
+    updatedAt: requireStringField(value, "updatedAt", ctx),
+  };
+};
+
+const mapAdminCreateOrganizationResult = (
+  value: unknown,
+): AdminCreateOrganizationResult => {
+  if (!isPlainObject(value)) {
+    throw new Error(
+      "Invalid create organization response: expected an object.",
+    );
+  }
+  const ctx = "create organization response";
+  return {
+    organizationId: requireNumberField(value, "organizationId", ctx),
+    organizationName: requireStringField(value, "organizationName", ctx),
+    baseCurrency: requireStringField(value, "baseCurrency", ctx),
+    status: requireEnumField(value, "status", VALID_ORG_STATUSES, ctx),
+    invitationId: requireNumberField(value, "invitationId", ctx),
+    invitedAdminEmail: requireStringField(value, "invitedAdminEmail", ctx),
+    invitationToken: requireStringField(value, "invitationToken", ctx),
+    invitationExpiresAt: requireStringField(value, "invitationExpiresAt", ctx),
+    createdAt: requireStringField(value, "createdAt", ctx),
+  };
+};
+
+const mapPlatformOrganizationUser = (
+  value: unknown,
+): PlatformOrganizationUser => {
+  if (!isPlainObject(value)) {
+    throw new Error(
+      "Invalid platform organization user: expected an object.",
+    );
+  }
+  const ctx = "platform organization user";
+  return {
+    id: requireNumberField(value, "id", ctx),
+    email: requireStringField(value, "email", ctx),
+    fullName: requireStringField(value, "fullName", ctx),
+    role: requireEnumField(value, "role", VALID_ALL_ROLES, ctx),
+    status: requireEnumField(value, "status", VALID_USER_STATUSES, ctx),
+    createdAt: requireStringField(value, "createdAt", ctx),
+  };
+};
+
+const mapRecoveryInvitationResult = (
+  value: unknown,
+): RecoveryInvitationResult => {
+  if (!isPlainObject(value)) {
+    throw new Error(
+      "Invalid recovery invitation response: expected an object.",
+    );
+  }
+  const ctx = "recovery invitation response";
+  return {
+    invitationId: requireNumberField(value, "invitationId", ctx),
+    organizationId: requireNumberField(value, "organizationId", ctx),
+    invitedEmail: requireStringField(value, "invitedEmail", ctx),
+    role: requireEnumField(value, "role", VALID_ALL_ROLES, ctx),
+    purpose: requireEnumField(value, "purpose", VALID_INVITE_PURPOSES, ctx),
+    targetUserId: optionalNumberField(value, "targetUserId"),
+    invitationToken: requireStringField(value, "invitationToken", ctx),
+    expiresAt: requireStringField(value, "expiresAt", ctx),
+    createdAt: requireStringField(value, "createdAt", ctx),
+  };
+};
+
+const mapPlatformAuditLogItem = (value: unknown): PlatformAuditLogItem => {
+  if (!isPlainObject(value)) {
+    throw new Error("Invalid platform audit log item: expected an object.");
+  }
+  const ctx = "platform audit log item";
+  return {
+    id: requireNumberField(value, "id", ctx),
+    actor: optionalStringField(value, "actor") ?? "System",
+    action: requireStringField(value, "action", ctx),
+    targetOrganizationId: optionalNumberField(value, "targetOrganizationId"),
+    targetOrganizationName: optionalStringField(
+      value,
+      "targetOrganizationName",
+    ),
+    targetUserId: optionalNumberField(value, "targetUserId"),
+    targetUserEmail: optionalStringField(value, "targetUserEmail"),
+    createdAt: requireStringField(value, "createdAt", ctx),
+    metadata: typeof value.metadata === "string" ? value.metadata : "{}",
   };
 };
 
@@ -1369,5 +1676,182 @@ export const createApiService = (
       };
     },
 
+    async getPlatformOverview(): Promise<PlatformOverview> {
+      const response = await request<unknown>("/admin/overview");
+      return mapPlatformOverview(response);
+    },
+
+    async listPlatformOrganizations(
+      input: ListPlatformOrganizationsInput,
+    ): Promise<PageResult<PlatformOrganizationSummary>> {
+      const size = input.size ?? 20;
+      const path = `/admin/organizations${buildQuery({
+        search: input.search?.trim() || undefined,
+        status: input.status,
+        page: toApiPage(input.page),
+        size,
+      })}`;
+      const response = await request<unknown>(path);
+      if (!isPlainObject(response) || !Array.isArray(response.items)) {
+        throw new Error(
+          "Invalid platform organizations response: expected a paginated list.",
+        );
+      }
+      const items = response.items.map(mapPlatformOrganizationSummary);
+      return mapPageResult({
+        page: typeof response.page === "number" ? response.page : 0,
+        size: typeof response.size === "number" ? response.size : size,
+        totalElements:
+          typeof response.totalElements === "number"
+            ? response.totalElements
+            : items.length,
+        totalPages:
+          typeof response.totalPages === "number" ? response.totalPages : 1,
+        items,
+      });
+    },
+
+    async createPlatformOrganization(payload: {
+      organizationName: string;
+      baseCurrency: string;
+      adminEmail: string;
+    }): Promise<AdminCreateOrganizationResult> {
+      const response = await request<unknown>("/admin/organizations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organizationName: payload.organizationName,
+          baseCurrency: payload.baseCurrency,
+          adminEmail: payload.adminEmail,
+        }),
+      });
+      return mapAdminCreateOrganizationResult(response);
+    },
+
+    async getPlatformOrganizationDetail(
+      organizationId: number,
+    ): Promise<PlatformOrganizationDetail> {
+      const response = await request<unknown>(
+        `/admin/organizations/${organizationId}`,
+      );
+      return mapPlatformOrganizationDetail(response);
+    },
+
+    async updatePlatformOrganization(
+      organizationId: number,
+      payload: Partial<{ name: string; baseCurrency: string }>,
+    ): Promise<PlatformOrganizationDetail> {
+      const nextPayload: Partial<{ name: string; baseCurrency: string }> = {};
+      if (payload.name !== undefined) {
+        nextPayload.name = payload.name;
+      }
+      if (payload.baseCurrency !== undefined) {
+        nextPayload.baseCurrency = payload.baseCurrency;
+      }
+      const response = await request<unknown>(
+        `/admin/organizations/${organizationId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(nextPayload),
+        },
+      );
+      return mapPlatformOrganizationDetail(response);
+    },
+
+    async updatePlatformOrganizationStatus(
+      organizationId: number,
+      payload: { status: "ACTIVE" | "SUSPENDED"; reason?: string },
+    ): Promise<PlatformOrganizationDetail> {
+      const response = await request<unknown>(
+        `/admin/organizations/${organizationId}/status`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            status: payload.status,
+            ...(payload.reason !== undefined ? { reason: payload.reason } : {}),
+          }),
+        },
+      );
+      return mapPlatformOrganizationDetail(response);
+    },
+
+    async listPlatformOrganizationUsers(
+      organizationId: number,
+    ): Promise<PlatformOrganizationUser[]> {
+      const response = await request<unknown>(
+        `/admin/organizations/${organizationId}/users`,
+      );
+      if (!Array.isArray(response)) {
+        throw new Error(
+          "Invalid platform organization users response: expected an array.",
+        );
+      }
+      return response.map(mapPlatformOrganizationUser);
+    },
+
+    async updatePlatformOrganizationUserStatus(
+      organizationId: number,
+      userId: number,
+      status: UserStatus,
+    ): Promise<PlatformOrganizationUser> {
+      const response = await request<unknown>(
+        `/admin/organizations/${organizationId}/users/${userId}/status`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status }),
+        },
+      );
+      return mapPlatformOrganizationUser(response);
+    },
+
+    async createAdminRecoveryInvitation(
+      organizationId: number,
+      payload: { adminEmail: string },
+    ): Promise<RecoveryInvitationResult> {
+      const response = await request<unknown>(
+        `/admin/organizations/${organizationId}/recovery-invitation`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ adminEmail: payload.adminEmail }),
+        },
+      );
+      return mapRecoveryInvitationResult(response);
+    },
+
+    async listPlatformAuditLogs(
+      input: ListPlatformAuditInput,
+    ): Promise<PageResult<PlatformAuditLogItem>> {
+      const size = input.size ?? 20;
+      const path = `/admin/audit-logs${buildQuery({
+        action: input.action,
+        targetOrganizationId: input.targetOrganizationId,
+        from: input.fromDate,
+        to: input.toDate,
+        page: toApiPage(input.page),
+        size,
+      })}`;
+      const response = await request<unknown>(path);
+      if (!isPlainObject(response) || !Array.isArray(response.items)) {
+        throw new Error(
+          "Invalid platform audit logs response: expected a paginated list.",
+        );
+      }
+      const items = response.items.map(mapPlatformAuditLogItem);
+      return mapPageResult({
+        page: typeof response.page === "number" ? response.page : 0,
+        size: typeof response.size === "number" ? response.size : size,
+        totalElements:
+          typeof response.totalElements === "number"
+            ? response.totalElements
+            : items.length,
+        totalPages:
+          typeof response.totalPages === "number" ? response.totalPages : 1,
+        items,
+      });
+    },
   };
 };

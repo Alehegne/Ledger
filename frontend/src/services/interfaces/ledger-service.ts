@@ -1,6 +1,7 @@
 import type {
   Account,
   AccountBalance,
+  AdminCreateOrganizationResult,
   AuditLogItem,
   AuthSession,
   GeneralLedgerReport,
@@ -8,11 +9,19 @@ import type {
   JournalEntry,
   JournalEntryStatus,
   OrganizationSettings,
+  OrganizationStatus,
   OrganizationUser,
   OverviewSnapshot,
   PageResult,
+  PlatformAuditLogItem,
+  PlatformOrganizationDetail,
+  PlatformOrganizationSummary,
+  PlatformOrganizationUser,
+  PlatformOverview,
+  RecoveryInvitationResult,
   Role,
   TrialBalanceReport,
+  UserStatus,
 } from "../../types/domain";
 
 export interface ListJournalEntriesInput {
@@ -41,6 +50,22 @@ export interface ListAuditInput {
   actor?: number;
   action?: string;
   entity?: string;
+  fromDate?: string;
+  toDate?: string;
+  page?: number;
+  size?: number;
+}
+
+export interface ListPlatformOrganizationsInput {
+  search?: string;
+  status?: OrganizationStatus;
+  page?: number;
+  size?: number;
+}
+
+export interface ListPlatformAuditInput {
+  action?: string;
+  targetOrganizationId?: number;
   fromDate?: string;
   toDate?: string;
   page?: number;
@@ -122,4 +147,40 @@ export interface LedgerService {
     }>,
   ): Promise<OrganizationSettings>;
   listAuditLogs(input: ListAuditInput): Promise<PageResult<AuditLogItem>>;
+
+  getPlatformOverview(): Promise<PlatformOverview>;
+  listPlatformOrganizations(
+    input: ListPlatformOrganizationsInput,
+  ): Promise<PageResult<PlatformOrganizationSummary>>;
+  createPlatformOrganization(payload: {
+    organizationName: string;
+    baseCurrency: string;
+    adminEmail: string;
+  }): Promise<AdminCreateOrganizationResult>;
+  getPlatformOrganizationDetail(
+    organizationId: number,
+  ): Promise<PlatformOrganizationDetail>;
+  updatePlatformOrganization(
+    organizationId: number,
+    payload: Partial<{ name: string; baseCurrency: string }>,
+  ): Promise<PlatformOrganizationDetail>;
+  updatePlatformOrganizationStatus(
+    organizationId: number,
+    payload: { status: "ACTIVE" | "SUSPENDED"; reason?: string },
+  ): Promise<PlatformOrganizationDetail>;
+  listPlatformOrganizationUsers(
+    organizationId: number,
+  ): Promise<PlatformOrganizationUser[]>;
+  updatePlatformOrganizationUserStatus(
+    organizationId: number,
+    userId: number,
+    status: UserStatus,
+  ): Promise<PlatformOrganizationUser>;
+  createAdminRecoveryInvitation(
+    organizationId: number,
+    payload: { adminEmail: string },
+  ): Promise<RecoveryInvitationResult>;
+  listPlatformAuditLogs(
+    input: ListPlatformAuditInput,
+  ): Promise<PageResult<PlatformAuditLogItem>>;
 }

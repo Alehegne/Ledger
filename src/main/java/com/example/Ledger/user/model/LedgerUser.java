@@ -1,6 +1,7 @@
 package com.example.Ledger.user.model;
 
 import com.example.Ledger.common.enums.Role;
+import com.example.Ledger.common.enums.UserStatus;
 import com.example.Ledger.common.persistence.BaseEntity;
 import com.example.Ledger.organization.model.Organization;
 import jakarta.persistence.Column;
@@ -52,6 +53,11 @@ public class LedgerUser extends BaseEntity {
     @Column(nullable = false, length = 20)
     private Role role;
 
+    @NotNull
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private UserStatus status = UserStatus.ACTIVE;
+
     public Organization getOrganization() {
         return organization;
     }
@@ -90,5 +96,13 @@ public class LedgerUser extends BaseEntity {
 
     public void setRole(Role role) {
         this.role = role;
+    }
+
+    public UserStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(UserStatus status) {
+        this.status = status;
     }
 }

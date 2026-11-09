@@ -69,7 +69,7 @@ public class GlobalExceptionHandler {
             ForbiddenException ex,
             HttpServletRequest request
     ) {
-        return buildResponse(HttpStatus.FORBIDDEN, "FORBIDDEN", ex.getMessage(), request.getRequestURI());
+        return buildResponse(HttpStatus.FORBIDDEN, ex.getCode(), ex.getMessage(), request.getRequestURI());
     }
 
     @ExceptionHandler(AccessDeniedException.class)
@@ -86,7 +86,7 @@ public class GlobalExceptionHandler {
             HttpServletRequest request
     ) {
         HttpStatus status = switch (ex.getCode()) {
-            case "DUPLICATE_ACCOUNT_CODE", "BASE_CURRENCY_LOCKED", "CONCURRENT_MODIFICATION", "LAST_ADMIN_PROTECTION" ->
+            case "DUPLICATE_ACCOUNT_CODE", "ORGANIZATION_NAME_EXISTS", "BASE_CURRENCY_LOCKED", "CONCURRENT_MODIFICATION", "LAST_ADMIN_PROTECTION", "NO_ACTIVE_ADMIN" ->
                     HttpStatus.CONFLICT;
             default -> HttpStatus.UNPROCESSABLE_CONTENT;
         };

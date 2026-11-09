@@ -32,9 +32,11 @@ const ERROR_CODE_TITLES: Record<string, string> = {
   ACCOUNT_INACTIVE: "Inactive Account Selected",
   BASE_CURRENCY_LOCKED: "Base Currency Locked",
   LAST_ADMIN_PROTECTION: "Administrator Required",
+  NO_ACTIVE_ADMIN: "Active Administrator Required",
   CONCURRENT_MODIFICATION: "Concurrent Edit Conflict",
   DUPLICATE_ACCOUNT_CODE: "Duplicate Account Code",
   DUPLICATE_EMAIL: "Email Already Registered",
+  ORGANIZATION_NAME_EXISTS: "Organization Name Unavailable",
   DATA_INTEGRITY_VIOLATION: "Ledger Integrity Constraint",
   CROSS_ORGANIZATION_ACCOUNT: "Cross-Organization Access Blocked",
   INVALID_DATE_RANGE: "Invalid Date Range",
@@ -42,6 +44,12 @@ const ERROR_CODE_TITLES: Record<string, string> = {
   INVALID_INVITATION: "Invalid Invitation",
   INVITATION_EXPIRED: "Invitation Expired",
   INVITATION_ALREADY_USED: "Invitation Already Accepted",
+  INVITATION_SUPERSEDED: "Invitation Superseded",
+  USER_DISABLED: "Account Disabled",
+  ORGANIZATION_SUSPENDED: "Organization Suspended",
+  ORGANIZATION_PENDING: "Onboarding Incomplete",
+  PLATFORM_ORGANIZATION_IMMUTABLE: "Protected Platform Anchor",
+  SERVICE_UNAVAILABLE: "Authentication Service Unavailable",
   RESOURCE_NOT_FOUND: "Record Not Found",
   FORBIDDEN: "Permission Denied",
   UNAUTHORIZED: "Authentication Required",
@@ -58,8 +66,18 @@ const ERROR_CODE_GUIDANCE: Record<string, string> = {
     "Total debits must exactly equal total credits before an entry can be posted.",
   LAST_ADMIN_PROTECTION:
     "At least one active Administrator must remain assigned to the organization.",
+  NO_ACTIVE_ADMIN:
+    "Reactivating this organization requires at least one active administrator. Re-enable a disabled administrator or complete a recovery invitation first.",
   CONCURRENT_MODIFICATION:
     "Another user modified this record simultaneously. Reload the latest data and retry.",
+  USER_DISABLED:
+    "Your user account has been disabled. Contact an administrator to restore access.",
+  ORGANIZATION_SUSPENDED:
+    "Your organization is suspended. Contact platform support for assistance.",
+  ORGANIZATION_PENDING:
+    "Organization onboarding has not been completed yet. Accept the onboarding administrator invitation first.",
+  INVITATION_SUPERSEDED:
+    "This invitation has been superseded by a newer invitation.",
   FORBIDDEN: "You do not have sufficient permissions for this operation.",
   UNAUTHORIZED: "Your session has expired. Please sign in again.",
 };

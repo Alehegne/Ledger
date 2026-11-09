@@ -2,12 +2,13 @@ package com.example.Ledger.organization.service;
 
 import com.example.Ledger.audit.service.AuditLogService;
 import com.example.Ledger.common.enums.AuditLogAction;
+import com.example.Ledger.common.enums.OrganizationKind;
 import com.example.Ledger.common.enums.Role;
 import com.example.Ledger.common.exception.BusinessException;
+import com.example.Ledger.common.exception.ForbiddenException;
 import com.example.Ledger.common.exception.ResourceNotFoundException;
 import com.example.Ledger.common.security.CurrentUserProvider;
 import com.example.Ledger.journal.repository.JournalEntryRepository;
-import com.example.Ledger.organization.dto.OrganizationRequest;
 import com.example.Ledger.organization.dto.OrganizationResponse;
 import com.example.Ledger.organization.dto.OrganizationSettingsUpdateRequest;
 import com.example.Ledger.organization.model.Organization;
@@ -38,29 +39,14 @@ public class OrganizationService {
         this.auditLogService = auditLogService;
     }
 
-    public OrganizationResponse createOrganization(OrganizationRequest request) {
-        currentUserProvider.requireRole(Role.ADMIN);
-
-        String cleanName = request.name().trim();
-        String cleanCurrency = request.baseCurrency().trim().toUpperCase();
-
-        if (organizationRepository.findByNameIgnoreCase(cleanName).isPresent()) {
-            throw new BusinessException("ORGANIZATION_NAME_EXISTS", "Organization name already exists");
-        }
-
-        Organization organization = new Organization();
-        organization.setName(cleanName);
-        organization.setBaseCurrency(cleanCurrency);
-        organization = organizationRepository.save(organization);
-
-        return toResponse(organization);
-    }
-
     @Transactional(readOnly = true)
     public OrganizationResponse getCurrentOrganization() {
         Long organizationId = currentUserProvider.getCurrentOrganizationId();
         Organization organization = organizationRepository.findById(organizationId)
                 .orElseThrow(() -> new ResourceNotFoundException("Organization not found"));
+        if (organization.getKind() == OrganizationKind.PLATFORM) {
+            throw new ForbiddenException("Platform organization is not accessible through tenant endpoints");
+        }
         return toResponse(organization);
     }
 
@@ -76,6 +62,9 @@ public class OrganizationService {
         Long organizationId = currentUserProvider.getCurrentOrganizationId();
         Organization organization = organizationRepository.findLockedById(organizationId)
                 .orElseThrow(() -> new ResourceNotFoundException("Organization not found"));
+        if (organization.getKind() == OrganizationKind.PLATFORM) {
+            throw new ForbiddenException("Platform organization is not accessible through tenant endpoints");
+        }
 
         if (request == null) {
             return toResponse(organization);
@@ -84,6 +73,9 @@ public class OrganizationService {
         String nextName = request.name() == null ? null : request.name().trim();
         if (nextName != null && nextName.isBlank()) {
             throw new BusinessException("ORGANIZATION_NAME_REQUIRED", "Organization name is required");
+        }
+        if (nextName != null && "ledger platform".equalsIgnoreCase(nextName)) {
+            throw new BusinessException("RESERVED_ORGANIZATION_NAME", "Organization name 'Ledger Platform' is reserved");
         }
 
         final Organization currentOrganization = organization;

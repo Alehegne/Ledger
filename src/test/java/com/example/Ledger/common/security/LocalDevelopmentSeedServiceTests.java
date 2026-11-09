@@ -1,6 +1,7 @@
 package com.example.Ledger.common.security;
 
 import com.example.Ledger.account.repository.AccountRepository;
+import com.example.Ledger.support.PostgresIntegrationTestSupport;
 import com.example.Ledger.common.enums.Role;
 import com.example.Ledger.invitation.repository.InvitationRepository;
 import com.example.Ledger.journal.repository.JournalEntryRepository;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.jpa.JpaSystemException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
@@ -23,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
-class LocalDevelopmentSeedServiceTests {
+class LocalDevelopmentSeedServiceTests extends PostgresIntegrationTestSupport {
 
     @Autowired
     private OrganizationRepository organizationRepository;
@@ -52,15 +54,12 @@ class LocalDevelopmentSeedServiceTests {
     @Autowired
     private com.example.Ledger.audit.repository.AuditLogRepository auditLogRepository;
 
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
     @BeforeEach
     void resetSeedState() {
-        journalLineRepository.deleteAll();
-        journalEntryRepository.deleteAll();
-        invitationRepository.deleteAll();
-        auditLogRepository.deleteAll();
-        userRepository.deleteAll();
-        accountRepository.deleteAll();
-        organizationRepository.deleteAll();
+        jdbcTemplate.execute("TRUNCATE TABLE journal_line, journal_entry, invitation, audit_log, app_user, account, organization CASCADE");
     }
 
     @Test
@@ -194,33 +193,18 @@ class LocalDevelopmentSeedServiceTests {
     }
 
     @Test
-    void seedRejectsAmbiguousOrganizationNamesInsteadOfPickingAnArbitraryRecord() {
-        String suffix = UUID.randomUUID().toString().substring(0, 8);
-        String email = "ambiguous." + suffix + "@ledger.test";
-
+    void databaseEnforcesCaseInsensitiveOrganizationNameUniqueness() {
         Organization first = new Organization();
         first.setName("Ledger Bootstrap");
         first.setBaseCurrency("ETB");
-        organizationRepository.save(first);
+        organizationRepository.saveAndFlush(first);
 
-        Organization second = new Organization();
-        second.setName("Ledger Bootstrap");
-        second.setBaseCurrency("USD");
-        organizationRepository.save(second);
+        Organization duplicate = new Organization();
+        duplicate.setName("ledger bootstrap");
+        duplicate.setBaseCurrency("USD");
 
-        assertThatThrownBy(() -> seedService.seedDevelopmentData(
-                "Ledger Bootstrap",
-                "ETB",
-                email,
-                "SeedPass!",
-                "accountant." + suffix + "@ledger.test",
-                "Accountant123!",
-                "viewer." + suffix + "@ledger.test",
-                "Viewer123!"
-        )).isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("multiple organizations with that name")
-                .hasMessageContaining("dedicated local development database")
-                .hasMessageContaining("existing organization records were not changed");
+        assertThatThrownBy(() -> organizationRepository.saveAndFlush(duplicate))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test

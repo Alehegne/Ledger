@@ -17,6 +17,12 @@ const NON_REFRESHABLE_PATHS = [
   "/invitations/accept",
 ];
 
+const REVOKED_SESSION_ERROR_CODES = new Set([
+  "USER_DISABLED",
+  "ORGANIZATION_SUSPENDED",
+  "ORGANIZATION_PENDING",
+]);
+
 const isRefreshEligible = (path: string, hasRetried: boolean): boolean => {
   if (hasRetried) return false;
   const pathWithoutQuery = path.split("?")[0] ?? path;
@@ -145,6 +151,14 @@ export const createHttpClient = (options: HttpClientOptions) => {
       }
 
       const appError = buildAppError(response, rawBody, hasBody);
+      if (
+        response.status === 403 &&
+        REVOKED_SESSION_ERROR_CODES.has(appError.code) &&
+        isRefreshEligible(path, hasRetried)
+      ) {
+        options.onUnauthorized();
+      }
+
       throw appError;
     }
 

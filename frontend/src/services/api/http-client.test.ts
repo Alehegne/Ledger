@@ -329,4 +329,54 @@ describe("http client", () => {
     ).toHaveLength(1);
   });
 
+  it("calls onUnauthorized for session-revoking 403 error codes on protected routes but skips /auth/login and generic FORBIDDEN", async () => {
+    const onUnauthorized = vi.fn();
+    const http = createHttpClient({ getToken: () => "jwt-1", onUnauthorized });
+
+    for (const code of [
+      "USER_DISABLED",
+      "ORGANIZATION_SUSPENDED",
+      "ORGANIZATION_PENDING",
+    ]) {
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ code, message: "Blocked" }), {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      await expect(http("/accounts")).rejects.toMatchObject({
+        status: 403,
+        code,
+      });
+    }
+    expect(onUnauthorized).toHaveBeenCalledTimes(3);
+
+    // /auth/login should NOT invoke onUnauthorized on 403 ORGANIZATION_SUSPENDED
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ code: "ORGANIZATION_SUSPENDED", message: "Suspended" }),
+        { status: 403, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    await expect(
+      http("/auth/login", { method: "POST", body: "{}" }),
+    ).rejects.toMatchObject({
+      status: 403,
+      code: "ORGANIZATION_SUSPENDED",
+    });
+    expect(onUnauthorized).toHaveBeenCalledTimes(3);
+
+    // Generic 403 FORBIDDEN must not log the user out
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ code: "FORBIDDEN", message: "Denied" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    await expect(http("/users")).rejects.toMatchObject({
+      status: 403,
+      code: "FORBIDDEN",
+    });
+    expect(onUnauthorized).toHaveBeenCalledTimes(3);
+  });
 });

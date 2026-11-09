@@ -44,11 +44,11 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health", "/auth/login", "/auth/refresh", "/auth/logout", "/error").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/organizations").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/invitations/accept").permitAll()
+                        .requestMatchers("/admin/**").hasRole("SUPER_ADMIN")
                         .requestMatchers("/organizations/me", "/organizations/settings").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/users/invite").hasRole("ADMIN")
                         .requestMatchers("/users/**", "/invitations", "/invitations/**").hasRole("ADMIN")
-                        .requestMatchers(HttpMethod.POST, "/invitations/accept").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/audit-logs", "/api/audit-logs/**", "/audit-logs", "/audit-logs/**").hasRole("ADMIN")
                         .requestMatchers("/accounts/**", "/journal-entries/**", "/api/reports/**", "/api/dashboard/**").hasAnyRole("ADMIN", "ACCOUNTANT", "VIEWER")
                         .anyRequest().authenticated())
@@ -86,20 +86,20 @@ public class SecurityConfig {
 
     @Bean
     public UserDetailsService userDetailsService(LedgerUserRepository userRepository) {
-                return username -> {
-                        var users = userRepository.findAllByEmailIgnoreCase(username);
-                        if (users.size() != 1) {
-                                throw new UsernameNotFoundException("User not found");
-                        }
+        return username -> {
+            var users = userRepository.findAllByEmailIgnoreCase(username);
+            if (users.size() != 1) {
+                throw new UsernameNotFoundException("User not found");
+            }
 
-                        var user = users.getFirst();
-                        return new UserPrincipal(
-                                        user.getId(),
-                                        user.getEmail(),
-                                        user.getOrganization() == null ? null : user.getOrganization().getId(),
-                                        user.getRole()
-                        );
-                };
+            var user = users.getFirst();
+            return new UserPrincipal(
+                    user.getId(),
+                    user.getEmail(),
+                    user.getOrganization() == null ? null : user.getOrganization().getId(),
+                    user.getRole()
+            );
+        };
     }
 
     @Bean

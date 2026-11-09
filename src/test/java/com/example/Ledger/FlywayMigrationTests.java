@@ -83,4 +83,43 @@ class FlywayMigrationTests extends PostgresIntegrationTestSupport {
                     .isEqualTo(1);
         });
     }
+
+    @Test
+    void migrationV10AndPlatformGovernanceSchemaExist() {
+        Integer appliedV10 = jdbcTemplate.queryForObject(
+                "select count(*) from flyway_schema_history where version = '10' and success = true",
+                Integer.class
+        );
+        assertThat(appliedV10).isEqualTo(1);
+
+        Integer platformAuditTable = jdbcTemplate.queryForObject(
+                "select count(*) from information_schema.tables where table_schema = 'public' and table_name = 'platform_audit_log'",
+                Integer.class
+        );
+        assertThat(platformAuditTable).isEqualTo(1);
+
+        Integer orgNameUniqueIndex = jdbcTemplate.queryForObject(
+                "select count(*) from pg_indexes where schemaname = 'public' and tablename = 'organization' and indexname = 'uk_organization_name_lower'",
+                Integer.class
+        );
+        assertThat(orgNameUniqueIndex).isEqualTo(1);
+
+        Integer openInviteUniqueIndex = jdbcTemplate.queryForObject(
+                "select count(*) from pg_indexes where schemaname = 'public' and tablename = 'invitation' and indexname = 'uk_invitation_open_org_email'",
+                Integer.class
+        );
+        assertThat(openInviteUniqueIndex).isEqualTo(1);
+
+        Integer kindColumn = jdbcTemplate.queryForObject(
+                "select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'organization' and column_name = 'kind'",
+                Integer.class
+        );
+        assertThat(kindColumn).isEqualTo(1);
+
+        Integer userStatusColumn = jdbcTemplate.queryForObject(
+                "select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'app_user' and column_name = 'status'",
+                Integer.class
+        );
+        assertThat(userStatusColumn).isEqualTo(1);
+    }
 }

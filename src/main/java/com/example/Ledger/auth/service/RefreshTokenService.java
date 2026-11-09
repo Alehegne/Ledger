@@ -3,6 +3,10 @@ package com.example.Ledger.auth.service;
 import com.example.Ledger.auth.dto.LoginResponse;
 import com.example.Ledger.auth.model.RefreshToken;
 import com.example.Ledger.auth.repository.RefreshTokenRepository;
+import com.example.Ledger.common.enums.OrganizationKind;
+import com.example.Ledger.common.enums.OrganizationStatus;
+import com.example.Ledger.common.enums.UserStatus;
+import com.example.Ledger.common.exception.ForbiddenException;
 import com.example.Ledger.common.exception.UnauthorizedException;
 import com.example.Ledger.common.security.JwtService;
 import com.example.Ledger.organization.model.Organization;
@@ -55,7 +59,7 @@ public class RefreshTokenService {
         return createAndSaveToken(user, UUID.randomUUID().toString(), Instant.now());
     }
 
-    @Transactional(noRollbackFor = UnauthorizedException.class)
+    @Transactional(noRollbackFor = {UnauthorizedException.class, ForbiddenException.class})
     public LoginResponse rotateRefreshToken(String rawRefreshToken) {
         if (!StringUtils.hasText(rawRefreshToken)) {
             throw new UnauthorizedException("Invalid refresh token");
@@ -84,7 +88,19 @@ public class RefreshTokenService {
             throw new UnauthorizedException("Refresh token has expired");
         }
 
+        if (user.getStatus() == UserStatus.DISABLED) {
+            throw new ForbiddenException("USER_DISABLED", "User account has been disabled");
+        }
+
         Organization organization = user.getOrganization();
+        if (organization != null && organization.getKind() == OrganizationKind.TENANT) {
+            if (organization.getStatus() == OrganizationStatus.SUSPENDED) {
+                throw new ForbiddenException("ORGANIZATION_SUSPENDED", "Organization has been suspended");
+            }
+            if (organization.getStatus() == OrganizationStatus.PENDING) {
+                throw new ForbiddenException("ORGANIZATION_PENDING", "Organization onboarding has not been completed");
+            }
+        }
 
         IssuedRefreshToken replacement = createAndSaveToken(user, existing.getFamilyId(), now);
         existing.setRevokedAt(now);

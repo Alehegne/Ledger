@@ -152,4 +152,28 @@ public interface JournalLineRepository extends JpaRepository<JournalLine, Long> 
 					@Param("accountId") Long accountId,
 					@Param("throughDate") LocalDate throughDate
 	);
+
+	@Query("""
+					select new com.example.Ledger.journal.repository.JournalLineRepository$PostedAccountTotals(
+							coalesce(sum(case when jl.side = com.example.Ledger.common.enums.EntrySide.DEBIT then jl.amount else 0 end), 0),
+							coalesce(sum(case when jl.side = com.example.Ledger.common.enums.EntrySide.CREDIT then jl.amount else 0 end), 0)
+					)
+					from JournalLine jl
+					join jl.journalEntry je
+					where je.organization.id = :organizationId
+						and je.status = com.example.Ledger.common.enums.JournalEntryStatus.POSTED
+					""")
+	PostedAccountTotals sumPostedDebitsAndCreditsForOrganization(@Param("organizationId") Long organizationId);
+
+	@Query("""
+					select je.organization.id
+					from JournalLine jl
+					join jl.journalEntry je
+					where je.organization.kind = com.example.Ledger.common.enums.OrganizationKind.TENANT
+						and je.status = com.example.Ledger.common.enums.JournalEntryStatus.POSTED
+					group by je.organization.id
+					having coalesce(sum(case when jl.side = com.example.Ledger.common.enums.EntrySide.DEBIT then jl.amount else 0 end), 0)
+					    <> coalesce(sum(case when jl.side = com.example.Ledger.common.enums.EntrySide.CREDIT then jl.amount else 0 end), 0)
+					""")
+	List<Long> findUnbalancedTenantOrganizationIds();
 }

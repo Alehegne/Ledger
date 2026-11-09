@@ -3,7 +3,9 @@ package com.example.Ledger.user.service;
 import com.example.Ledger.audit.service.AuditLogService;
 import com.example.Ledger.common.enums.AuditLogAction;
 import com.example.Ledger.common.enums.Role;
+import com.example.Ledger.common.enums.UserStatus;
 import com.example.Ledger.common.exception.BusinessException;
+import com.example.Ledger.common.exception.ForbiddenException;
 import com.example.Ledger.common.exception.ResourceNotFoundException;
 import com.example.Ledger.common.security.CurrentUserProvider;
 import com.example.Ledger.user.dto.OrganizationUserResponse;
@@ -18,8 +20,6 @@ import java.util.Map;
 @Service
 @Transactional(readOnly = true)
 public class UserDirectoryService {
-
-    private static final String ACTIVE_INVITATION_STATUS = "ACTIVE";
 
     private final LedgerUserRepository userRepository;
     private final CurrentUserProvider currentUserProvider;
@@ -41,28 +41,36 @@ public class UserDirectoryService {
 
         return userRepository.findByOrganizationIdOrderByFullNameAscEmailAsc(organizationId)
                 .stream()
-                .map(user -> new OrganizationUserResponse(
-                        user.getId(),
-                        user.getEmail(),
-                        user.getFullName(),
-                        user.getRole(),
-                        ACTIVE_INVITATION_STATUS
-                ))
+                .map(this::toResponse)
                 .toList();
     }
 
     @Transactional
     public OrganizationUserResponse updateUserRole(Long userId, Role newRole) {
         currentUserProvider.requireRole(Role.ADMIN);
+        if (newRole == null || !newRole.isTenantAssignable()) {
+            throw new ForbiddenException("Cannot assign platform role " + newRole + " to a tenant user");
+        }
+
         Long organizationId = currentUserProvider.getCurrentOrganizationId();
 
         LedgerUser user = userRepository.findByIdAndOrganizationId(userId, organizationId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
-        if (user.getRole() == Role.ADMIN && newRole != Role.ADMIN) {
-            long adminCount = userRepository.countByOrganizationIdAndRole(organizationId, Role.ADMIN);
-            if (adminCount <= 1) {
-                throw new BusinessException("LAST_ADMIN_PROTECTION", "Cannot demote the last administrator in the organization");
+        if (user.getRole() == Role.SUPER_ADMIN) {
+            throw new ForbiddenException("Cannot modify platform administrator role");
+        }
+
+        if (user.getRole() == Role.ADMIN
+                && newRole != Role.ADMIN
+                && user.getStatus() == UserStatus.ACTIVE) {
+            long activeAdminCount = userRepository.countByOrganizationIdAndRoleAndStatus(
+                    organizationId,
+                    Role.ADMIN,
+                    UserStatus.ACTIVE
+            );
+            if (activeAdminCount <= 1) {
+                throw new BusinessException("LAST_ADMIN_PROTECTION", "Cannot demote the last active administrator in the organization");
             }
         }
 
@@ -81,12 +89,16 @@ public class UserDirectoryService {
                 )
         );
 
+        return toResponse(user);
+    }
+
+    private OrganizationUserResponse toResponse(LedgerUser user) {
         return new OrganizationUserResponse(
                 user.getId(),
                 user.getEmail(),
                 user.getFullName(),
                 user.getRole(),
-                ACTIVE_INVITATION_STATUS
+                user.getStatus().name()
         );
     }
 }

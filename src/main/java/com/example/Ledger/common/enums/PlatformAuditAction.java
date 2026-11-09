@@ -1,0 +1,11 @@
+package com.example.Ledger.common.enums;
+
+public enum PlatformAuditAction {
+    ORGANIZATION_CREATED,
+    ORGANIZATION_UPDATED,
+    ORGANIZATION_SUSPENDED,
+    ORGANIZATION_REACTIVATED,
+    TENANT_USER_DISABLED,
+    TENANT_USER_ENABLED,
+    ADMIN_RECOVERY_INVITED
+}

@@ -20,6 +20,9 @@ import { JournalPage } from "./features/journal/journal-page";
 import { ReportsPage } from "./features/reports/reports-page";
 import { OrganizationPage } from "./features/organization/organization-page";
 import { AuditPage } from "./features/audit/audit-page";
+import { AdminOverviewPage } from "./features/admin/admin-overview-page";
+import { AdminOrganizationsPage } from "./features/admin/admin-organizations-page";
+import { AdminAuditPage } from "./features/admin/admin-audit-page";
 
 const ProtectedLayout = () => {
   return (
@@ -37,10 +40,29 @@ const PublicLayout = () => {
   const { session } = useAuth();
 
   if (session) {
-    return <Navigate to="/" replace />;
+    return (
+      <Navigate
+        to={session.user.role === "SUPER_ADMIN" ? "/admin/overview" : "/"}
+        replace
+      />
+    );
   }
 
   return <Outlet />;
+};
+
+const TenantHomeRoute = () => {
+  const { session } = useAuth();
+
+  if (session?.user.role === "SUPER_ADMIN") {
+    return <Navigate to="/admin/overview" replace />;
+  }
+
+  return (
+    <RequireRole allowedRoles={["ADMIN", "ACCOUNTANT", "VIEWER"]}>
+      <DashboardPage />
+    </RequireRole>
+  );
 };
 
 function App() {
@@ -58,8 +80,15 @@ function App() {
           </Route>
 
           <Route element={<ProtectedLayout />}>
-            <Route index element={<DashboardPage />} />
-            <Route path="/accounts" element={<AccountsPage />} />
+            <Route index element={<TenantHomeRoute />} />
+            <Route
+              path="/accounts"
+              element={
+                <RequireRole allowedRoles={["ADMIN", "ACCOUNTANT", "VIEWER"]}>
+                  <AccountsPage />
+                </RequireRole>
+              }
+            />
             <Route
               path="/journal"
               element={
@@ -80,7 +109,14 @@ function App() {
               path="/journal-entries/:entryId"
               element={<Navigate to="/journal" replace />}
             />
-            <Route path="/reports" element={<ReportsPage />} />
+            <Route
+              path="/reports"
+              element={
+                <RequireRole allowedRoles={["ADMIN", "ACCOUNTANT", "VIEWER"]}>
+                  <ReportsPage />
+                </RequireRole>
+              }
+            />
             <Route
               path="/reports/general-ledger"
               element={<Navigate to="/reports" replace />}
@@ -132,6 +168,38 @@ function App() {
             <Route
               path="/audit-logs"
               element={<Navigate to="/audit" replace />}
+            />
+            <Route
+              path="/admin"
+              element={
+                <RequireRole allowedRoles={["SUPER_ADMIN"]}>
+                  <Navigate to="/admin/overview" replace />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/admin/overview"
+              element={
+                <RequireRole allowedRoles={["SUPER_ADMIN"]}>
+                  <AdminOverviewPage />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/admin/organizations"
+              element={
+                <RequireRole allowedRoles={["SUPER_ADMIN"]}>
+                  <AdminOrganizationsPage />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/admin/audit"
+              element={
+                <RequireRole allowedRoles={["SUPER_ADMIN"]}>
+                  <AdminAuditPage />
+                </RequireRole>
+              }
             />
             <Route path="/forbidden" element={<AccessDeniedPage />} />
             <Route path="*" element={<NotFoundPage />} />

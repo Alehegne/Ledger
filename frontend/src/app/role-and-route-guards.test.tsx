@@ -20,11 +20,24 @@ const makeSession = (role: AuthSession["user"]["role"]): AuthSession => ({
   token: `${role.toLowerCase()}-token`,
   expiresAt: "2099-12-31T00:00:00Z",
   user: {
-    id: role === "ADMIN" ? 10 : role === "ACCOUNTANT" ? 11 : 12,
-    email: `${role.toLowerCase()}@northstar.co`,
+    id:
+      role === "SUPER_ADMIN"
+        ? 1
+        : role === "ADMIN"
+          ? 10
+          : role === "ACCOUNTANT"
+            ? 11
+            : 12,
+    email:
+      role === "SUPER_ADMIN"
+        ? "super@platform.ledger"
+        : `${role.toLowerCase()}@northstar.co`,
     fullName: `${role} User`,
     role,
-    organizationId: 42,
+    organizationId: role === "SUPER_ADMIN" ? 3 : 42,
+    ...(role === "SUPER_ADMIN"
+      ? { organizationName: "Ledger Platform" }
+      : {}),
   },
 });
 
@@ -207,4 +220,55 @@ describe("frontend architectural contracts", () => {
     );
   });
 
+  it("redirects SUPER_ADMIN from root to platform overview and denies tenant accounting routes", async () => {
+    const superSession = makeSession("SUPER_ADMIN");
+    localStorage.setItem(
+      "ledger.frontend.auth.session",
+      JSON.stringify(superSession),
+    );
+    window.history.replaceState({}, "", "/");
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Customer Platform Health" }),
+    ).toBeInTheDocument();
+
+    window.history.replaceState({}, "", "/accounts");
+    render(<App />);
+    expect(
+      await screen.findByText(/you do not have permission to view this page/i),
+    ).toBeInTheDocument();
+  });
+
+  it("denies tenant ADMIN access to /admin/overview", async () => {
+    const adminSession = makeSession("ADMIN");
+    localStorage.setItem(
+      "ledger.frontend.auth.session",
+      JSON.stringify(adminSession),
+    );
+    window.history.replaceState({}, "", "/admin/overview");
+
+    render(<App />);
+
+    expect(
+      await screen.findByText(/you do not have permission to view this page/i),
+    ).toBeInTheDocument();
+  });
+
+  it("retires the old /register public route to NotFoundPage", async () => {
+    window.history.replaceState({}, "", "/register");
+    render(<App />);
+
+    // Unauthenticated users hitting unknown routes are redirected to /login rather than public registration
+    expect(
+      await screen.findByRole("heading", { name: "Ledger access" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /register/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /accept invitation/i }),
+    ).toHaveAttribute("href", "/accept-invitation");
+  });
 });

@@ -41,7 +41,10 @@ export const LoginPage = () => {
       setServerError(null);
       const session = await service.login(values.email, values.password);
       setSession(session);
-      navigate("/", { replace: true });
+      navigate(
+        session.user.role === "SUPER_ADMIN" ? "/admin/overview" : "/",
+        { replace: true },
+      );
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unable to sign in.";

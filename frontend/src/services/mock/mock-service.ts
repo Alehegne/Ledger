@@ -1,23 +1,36 @@
 import Decimal from "decimal.js";
+import { AppError } from "../../lib/errors";
 import type {
   Account,
   AccountBalance,
+  AdminCreateOrganizationResult,
   AuditLogItem,
   AuthSession,
   GeneralLedgerReport,
   Invitation,
+  InvitationPurpose,
   JournalEntry,
   OrganizationSettings,
+  OrganizationStatus,
   OrganizationUser,
   OverviewSnapshot,
   PageResult,
+  PlatformAuditLogItem,
+  PlatformOrganizationDetail,
+  PlatformOrganizationSummary,
+  PlatformOrganizationUser,
+  PlatformOverview,
+  RecoveryInvitationResult,
   Role,
   TrialBalanceReport,
+  UserStatus,
 } from "../../types/domain";
 import type {
   LedgerService,
   ListAuditInput,
   ListJournalEntriesInput,
+  ListPlatformAuditInput,
+  ListPlatformOrganizationsInput,
 } from "../interfaces/ledger-service";
 
 const accountSeed: Account[] = [
@@ -271,9 +284,143 @@ const invitationsSeed: Invitation[] = [
   },
 ];
 
+interface MockPlatformOrganizationRecord {
+  id: number;
+  name: string;
+  baseCurrency: string;
+  status: OrganizationStatus;
+  suspendedAt: string | null;
+  suspendedReason: string | null;
+  accountCount: number;
+  postedEntryCount: number;
+  draftEntryCount: number;
+  trialBalanceBalanced: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface MockPlatformUserRecord {
+  id: number;
+  organizationId: number;
+  email: string;
+  fullName: string;
+  role: Role;
+  status: UserStatus;
+  createdAt: string;
+}
+
+interface MockPlatformInvitationRecord {
+  id: number;
+  organizationId: number;
+  invitedEmail: string;
+  role: Role;
+  purpose: InvitationPurpose;
+  targetUserId: number | null;
+  invitationToken: string;
+  expiresAt: string;
+  createdAt: string;
+  acceptedAt: string | null;
+  supersededAt: string | null;
+}
+
+const platformOrganizationsSeed: MockPlatformOrganizationRecord[] = [
+  {
+    id: 42,
+    name: "Northstar Co.",
+    baseCurrency: "USD",
+    status: "ACTIVE",
+    suspendedAt: null,
+    suspendedReason: null,
+    accountCount: 6,
+    postedEntryCount: 2,
+    draftEntryCount: 1,
+    trialBalanceBalanced: true,
+    createdAt: "2024-08-01T00:00:00Z",
+    updatedAt: "2025-01-25T12:00:00Z",
+  },
+  {
+    id: 43,
+    name: "Harbor Logistics LLC",
+    baseCurrency: "EUR",
+    status: "PENDING",
+    suspendedAt: null,
+    suspendedReason: null,
+    accountCount: 6,
+    postedEntryCount: 0,
+    draftEntryCount: 0,
+    trialBalanceBalanced: true,
+    createdAt: "2025-02-01T10:00:00Z",
+    updatedAt: "2025-02-01T10:00:00Z",
+  },
+];
+
+const platformUsersSeed: MockPlatformUserRecord[] = [
+  {
+    id: 10,
+    organizationId: 42,
+    email: "alex@northstar.co",
+    fullName: "Alex Morgan",
+    role: "ADMIN",
+    status: "ACTIVE",
+    createdAt: "2024-08-01T00:00:00Z",
+  },
+  {
+    id: 11,
+    organizationId: 42,
+    email: "mila@northstar.co",
+    fullName: "Mila Alvarez",
+    role: "ACCOUNTANT",
+    status: "ACTIVE",
+    createdAt: "2024-09-10T00:00:00Z",
+  },
+  {
+    id: 12,
+    organizationId: 42,
+    email: "nate@northstar.co",
+    fullName: "Nate Brooks",
+    role: "VIEWER",
+    status: "ACTIVE",
+    createdAt: "2025-01-20T14:20:00Z",
+  },
+];
+
+const platformInvitationsSeed: MockPlatformInvitationRecord[] = [
+  {
+    id: 101,
+    organizationId: 43,
+    invitedEmail: "founder@harbor.eu",
+    role: "ADMIN",
+    purpose: "ONBOARDING",
+    targetUserId: null,
+    invitationToken: "mock_onboard_harbor_43",
+    expiresAt: "2099-12-31T00:00:00Z",
+    createdAt: "2025-02-01T10:00:00Z",
+    acceptedAt: null,
+    supersededAt: null,
+  },
+];
+
+const platformAuditSeed: PlatformAuditLogItem[] = [
+  {
+    id: 1,
+    actor: "superadmin@ledger.local",
+    action: "ORGANIZATION_CREATED",
+    targetOrganizationId: 43,
+    targetOrganizationName: "Harbor Logistics LLC",
+    targetUserId: null,
+    targetUserEmail: null,
+    createdAt: "2025-02-01T10:00:00Z",
+    metadata: JSON.stringify({
+      organizationName: "Harbor Logistics LLC",
+      baseCurrency: "EUR",
+      invitedAdminEmail: "founder@harbor.eu",
+    }),
+  },
+];
+
 const STORAGE_KEY = "ledger-demo-state-v1";
 const STORAGE_VERSION_KEY = "ledger-demo-state-version";
-const DEMO_STATE_VERSION = 1;
+const DEMO_STATE_VERSION = 2;
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
@@ -403,6 +550,10 @@ const getInitialState = () => ({
   invitations: clone(invitationsSeed),
   settings: clone(settingsSeed),
   auditLogs: clone(auditSeed),
+  platformOrganizations: clone(platformOrganizationsSeed),
+  platformUsers: clone(platformUsersSeed),
+  platformInvitations: clone(platformInvitationsSeed),
+  platformAuditLogs: clone(platformAuditSeed),
 });
 
 export const resetMockServiceState = () => {
@@ -451,6 +602,18 @@ const loadState = () => {
       invitations: parsed.invitations as typeof invitationsSeed,
       settings: (parsed.settings ?? settingsSeed) as OrganizationSettings,
       auditLogs: (parsed.auditLogs ?? auditSeed) as AuditLogItem[],
+      platformOrganizations: Array.isArray(parsed.platformOrganizations)
+        ? (parsed.platformOrganizations as MockPlatformOrganizationRecord[])
+        : clone(platformOrganizationsSeed),
+      platformUsers: Array.isArray(parsed.platformUsers)
+        ? (parsed.platformUsers as MockPlatformUserRecord[])
+        : clone(platformUsersSeed),
+      platformInvitations: Array.isArray(parsed.platformInvitations)
+        ? (parsed.platformInvitations as MockPlatformInvitationRecord[])
+        : clone(platformInvitationsSeed),
+      platformAuditLogs: Array.isArray(parsed.platformAuditLogs)
+        ? (parsed.platformAuditLogs as PlatformAuditLogItem[])
+        : clone(platformAuditSeed),
     };
   } catch {
     if (typeof window !== "undefined") {
@@ -549,8 +712,93 @@ export const createMockService = (
       .reduce((sum, delta) => sum.plus(delta), new Decimal(0));
   };
 
+  const recordPlatformAudit = (
+    action: string,
+    targetOrg: MockPlatformOrganizationRecord | null,
+    targetUser: MockPlatformUserRecord | null,
+    metadataObj: Record<string, unknown>,
+  ) => {
+    const nextId =
+      Math.max(...state.platformAuditLogs.map((log) => log.id), 0) + 1;
+    state.platformAuditLogs.unshift({
+      id: nextId,
+      actor: activeSession.user.email,
+      action,
+      targetOrganizationId: targetOrg?.id ?? null,
+      targetOrganizationName: targetOrg?.name ?? null,
+      targetUserId: targetUser?.id ?? null,
+      targetUserEmail: targetUser?.email ?? null,
+      createdAt: new Date().toISOString(),
+      metadata: JSON.stringify(metadataObj),
+    });
+  };
+
+  const buildPlatformDetail = (
+    org: MockPlatformOrganizationRecord,
+  ): PlatformOrganizationDetail => {
+    const orgUsers = state.platformUsers.filter(
+      (user) => user.organizationId === org.id,
+    );
+    const openInvites = state.platformInvitations
+      .filter(
+        (inv) =>
+          inv.organizationId === org.id &&
+          inv.acceptedAt === null &&
+          inv.supersededAt === null,
+      )
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+    return {
+      id: org.id,
+      name: org.name,
+      baseCurrency: org.baseCurrency,
+      kind: "TENANT",
+      status: org.status,
+      suspendedAt: org.suspendedAt,
+      suspendedReason: org.suspendedReason,
+      userCount: orgUsers.length,
+      activeUserCount: orgUsers.filter((u) => u.status === "ACTIVE").length,
+      disabledUserCount: orgUsers.filter((u) => u.status === "DISABLED").length,
+      activeAdminCount: orgUsers.filter(
+        (u) => u.role === "ADMIN" && u.status === "ACTIVE",
+      ).length,
+      accountCount: org.accountCount,
+      postedEntryCount: org.postedEntryCount,
+      draftEntryCount: org.draftEntryCount,
+      hasTransactions: org.postedEntryCount + org.draftEntryCount > 0,
+      trialBalanceBalanced: org.trialBalanceBalanced,
+      pendingInvitations: openInvites.map((inv) => ({
+        id: inv.id,
+        invitedEmail: inv.invitedEmail,
+        role: inv.role,
+        purpose: inv.purpose,
+        expiresAt: inv.expiresAt,
+        createdAt: inv.createdAt,
+      })),
+      createdAt: org.createdAt,
+      updatedAt: org.updatedAt,
+    };
+  };
+
   return {
-    async login(): Promise<AuthSession> {
+    async login(email?: string): Promise<AuthSession> {
+      if (email && email.trim().toLowerCase().includes("super")) {
+        return {
+          token: "mock-super-admin-token",
+          expiresAt: "2099-12-31T23:59:59Z",
+          refreshToken: "mock-super-admin-refresh-token",
+          refreshExpiresAt: "2099-12-31T23:59:59Z",
+          user: {
+            id: 1,
+            email: email.trim().toLowerCase(),
+            fullName: "Platform Super Admin",
+            role: "SUPER_ADMIN",
+            organizationId: 1,
+            organizationName: "Ledger Platform",
+            baseCurrency: "USD",
+          },
+        };
+      }
       return makeSession();
     },
 
@@ -1252,26 +1500,91 @@ export const createMockService = (
           inv.invitedEmail.toLowerCase() === normalizedEmail &&
           inv.invitationToken === payload.token,
       );
-      if (!invitation) {
+      if (invitation) {
+        const existingUser = state.users.find(
+          (u) => u.email.toLowerCase() === normalizedEmail,
+        );
+        if (existingUser) {
+          throw new Error("A user with this email already exists.");
+        }
+        const nextUserId = Math.max(...state.users.map((u) => u.id), 0) + 1;
+        state.users.push({
+          id: nextUserId,
+          email: normalizedEmail,
+          fullName: payload.fullName.trim(),
+          role: invitation.role,
+          invitationStatus: "ACTIVE",
+        });
+        state.invitations = state.invitations.filter(
+          (inv) => inv.id !== invitation.id,
+        );
+        persist();
+        return { message: "Invitation accepted successfully." };
+      }
+
+      const platformInvite = state.platformInvitations.find(
+        (inv) =>
+          inv.invitedEmail.toLowerCase() === normalizedEmail &&
+          inv.invitationToken === payload.token,
+      );
+      if (!platformInvite) {
         throw new Error("Invitation is invalid or expired.");
       }
-      const existingUser = state.users.find(
-        (u) => u.email.toLowerCase() === normalizedEmail,
-      );
-      if (existingUser) {
-        throw new Error("A user with this email already exists.");
+      if (platformInvite.supersededAt) {
+        throw new AppError({
+          status: 422,
+          code: "INVITATION_SUPERSEDED",
+          message: "Invitation has been superseded.",
+        });
       }
-      const nextUserId = Math.max(...state.users.map((u) => u.id), 0) + 1;
-      state.users.push({
-        id: nextUserId,
-        email: normalizedEmail,
-        fullName: payload.fullName.trim(),
-        role: invitation.role,
-        invitationStatus: "ACTIVE",
-      });
-      state.invitations = state.invitations.filter(
-        (inv) => inv.id !== invitation.id,
+      if (platformInvite.acceptedAt) {
+        throw new AppError({
+          status: 422,
+          code: "INVITATION_ALREADY_USED",
+          message: "Invitation has already been accepted.",
+        });
+      }
+
+      const targetOrg = state.platformOrganizations.find(
+        (org) => org.id === platformInvite.organizationId,
       );
+      if (!targetOrg) {
+        throw new Error("Organization not found.");
+      }
+
+      const now = new Date().toISOString();
+      if (platformInvite.targetUserId !== null) {
+        const targetUser = state.platformUsers.find(
+          (u) => u.id === platformInvite.targetUserId,
+        );
+        if (!targetUser) {
+          throw new Error("Recovery target user no longer exists.");
+        }
+        targetUser.fullName = payload.fullName.trim();
+        targetUser.status = "ACTIVE";
+      } else {
+        const nextUserId =
+          Math.max(...state.platformUsers.map((u) => u.id), 0) + 1;
+        state.platformUsers.push({
+          id: nextUserId,
+          organizationId: targetOrg.id,
+          email: normalizedEmail,
+          fullName: payload.fullName.trim(),
+          role: platformInvite.role,
+          status: "ACTIVE",
+          createdAt: now,
+        });
+      }
+
+      if (
+        platformInvite.purpose === "ONBOARDING" &&
+        targetOrg.status === "PENDING"
+      ) {
+        targetOrg.status = "ACTIVE";
+        targetOrg.updatedAt = now;
+      }
+
+      platformInvite.acceptedAt = now;
       persist();
       return { message: "Invitation accepted successfully." };
     },
@@ -1385,5 +1698,597 @@ export const createMockService = (
       };
     },
 
+    async getPlatformOverview(): Promise<PlatformOverview> {
+      requireRole(["SUPER_ADMIN"], "view platform overview");
+      const orgs = state.platformOrganizations;
+      return {
+        totalTenantOrganizations: orgs.length,
+        activeTenantOrganizations: orgs.filter((o) => o.status === "ACTIVE")
+          .length,
+        pendingTenantOrganizations: orgs.filter((o) => o.status === "PENDING")
+          .length,
+        suspendedTenantOrganizations: orgs.filter(
+          (o) => o.status === "SUSPENDED",
+        ).length,
+        totalTenantUsers: state.platformUsers.length,
+        disabledTenantUsers: state.platformUsers.filter(
+          (u) => u.status === "DISABLED",
+        ).length,
+        totalTenantAccounts: orgs.reduce(
+          (sum, org) => sum + org.accountCount,
+          0,
+        ),
+        totalPostedJournalEntries: orgs.reduce(
+          (sum, org) => sum + org.postedEntryCount,
+          0,
+        ),
+        unbalancedTenantOrganizations: orgs.filter(
+          (o) => !o.trialBalanceBalanced,
+        ).length,
+        lastPlatformActionAt: state.platformAuditLogs[0]?.createdAt ?? null,
+      };
+    },
+
+    async listPlatformOrganizations(
+      input: ListPlatformOrganizationsInput,
+    ): Promise<PageResult<PlatformOrganizationSummary>> {
+      requireRole(["SUPER_ADMIN"], "list tenant organizations");
+      const search = input.search?.trim().toLowerCase() ?? "";
+      const filtered = state.platformOrganizations
+        .filter((org) => {
+          if (input.status && org.status !== input.status) return false;
+          if (search && !org.name.toLowerCase().includes(search)) return false;
+          return true;
+        })
+        .sort((a, b) => {
+          const cmp = b.createdAt.localeCompare(a.createdAt);
+          return cmp !== 0 ? cmp : b.id - a.id;
+        });
+
+      const page = input.page ?? 1;
+      const size = input.size ?? 20;
+      const start = (page - 1) * size;
+      const items: PlatformOrganizationSummary[] = filtered
+        .slice(start, start + size)
+        .map((org) => {
+          const orgUsers = state.platformUsers.filter(
+            (u) => u.organizationId === org.id,
+          );
+          const pendingInvitationCount = state.platformInvitations.filter(
+            (inv) =>
+              inv.organizationId === org.id &&
+              inv.acceptedAt === null &&
+              inv.supersededAt === null,
+          ).length;
+
+          return {
+            id: org.id,
+            name: org.name,
+            baseCurrency: org.baseCurrency,
+            status: org.status,
+            userCount: orgUsers.length,
+            activeAdminCount: orgUsers.filter(
+              (u) => u.role === "ADMIN" && u.status === "ACTIVE",
+            ).length,
+            disabledUserCount: orgUsers.filter((u) => u.status === "DISABLED")
+              .length,
+            accountCount: org.accountCount,
+            postedEntryCount: org.postedEntryCount,
+            draftEntryCount: org.draftEntryCount,
+            pendingInvitationCount,
+            lastActivityAt: org.updatedAt,
+            createdAt: org.createdAt,
+            suspendedAt: org.suspendedAt,
+            suspendedReason: org.suspendedReason,
+          };
+        });
+
+      return {
+        page,
+        size,
+        totalElements: filtered.length,
+        totalPages: Math.max(1, Math.ceil(filtered.length / size)),
+        items,
+      };
+    },
+
+    async createPlatformOrganization(payload): Promise<AdminCreateOrganizationResult> {
+      requireRole(["SUPER_ADMIN"], "provision tenant organizations");
+      const name = payload.organizationName.trim();
+      const baseCurrency = payload.baseCurrency.trim().toUpperCase();
+      const adminEmail = payload.adminEmail.trim().toLowerCase();
+
+      if (!name) {
+        throw new Error("Organization name is required.");
+      }
+      if (name.toLowerCase() === "ledger platform") {
+        throw new AppError({
+          status: 422,
+          code: "RESERVED_ORGANIZATION_NAME",
+          message: "Organization name 'Ledger Platform' is reserved.",
+        });
+      }
+      if (!/^[A-Z]{3}$/.test(baseCurrency)) {
+        throw new AppError({
+          status: 422,
+          code: "INVALID_CURRENCY",
+          message: "Base currency must be a 3-letter ISO code.",
+        });
+      }
+      if (!adminEmail.includes("@")) {
+        throw new Error("Valid administrator email is required.");
+      }
+      if (
+        state.platformOrganizations.some(
+          (org) => org.name.toLowerCase() === name.toLowerCase(),
+        )
+      ) {
+        throw new AppError({
+          status: 422,
+          code: "ORGANIZATION_NAME_EXISTS",
+          message: "Organization name already exists.",
+        });
+      }
+      if (
+        state.platformUsers.some((u) => u.email.toLowerCase() === adminEmail)
+      ) {
+        throw new AppError({
+          status: 422,
+          code: "DUPLICATE_EMAIL",
+          message: "A user with this email already exists.",
+        });
+      }
+
+      const now = new Date().toISOString();
+      const nextOrgId =
+        Math.max(...state.platformOrganizations.map((o) => o.id), 43) + 1;
+      const newOrg: MockPlatformOrganizationRecord = {
+        id: nextOrgId,
+        name,
+        baseCurrency,
+        status: "PENDING",
+        suspendedAt: null,
+        suspendedReason: null,
+        accountCount: 6,
+        postedEntryCount: 0,
+        draftEntryCount: 0,
+        trialBalanceBalanced: true,
+        createdAt: now,
+        updatedAt: now,
+      };
+      state.platformOrganizations.unshift(newOrg);
+
+      const nextInviteId =
+        Math.max(...state.platformInvitations.map((i) => i.id), 100) + 1;
+      const expiresAt = new Date(
+        Date.now() + 7 * 24 * 60 * 60 * 1000,
+      ).toISOString();
+      const rawToken = `mock_onboard_${nextOrgId}_${nextInviteId}`;
+      state.platformInvitations.unshift({
+        id: nextInviteId,
+        organizationId: nextOrgId,
+        invitedEmail: adminEmail,
+        role: "ADMIN",
+        purpose: "ONBOARDING",
+        targetUserId: null,
+        invitationToken: rawToken,
+        expiresAt,
+        createdAt: now,
+        acceptedAt: null,
+        supersededAt: null,
+      });
+
+      recordPlatformAudit("ORGANIZATION_CREATED", newOrg, null, {
+        organizationName: name,
+        baseCurrency,
+        invitedAdminEmail: adminEmail,
+      });
+      persist();
+
+      return {
+        organizationId: nextOrgId,
+        organizationName: name,
+        baseCurrency,
+        status: "PENDING",
+        invitationId: nextInviteId,
+        invitedAdminEmail: adminEmail,
+        invitationToken: rawToken,
+        invitationExpiresAt: expiresAt,
+        createdAt: now,
+      };
+    },
+
+    async getPlatformOrganizationDetail(
+      organizationId: number,
+    ): Promise<PlatformOrganizationDetail> {
+      requireRole(["SUPER_ADMIN"], "view tenant organization details");
+      const org = state.platformOrganizations.find(
+        (item) => item.id === organizationId,
+      );
+      if (!org) {
+        throw new AppError({
+          status: 404,
+          code: "RESOURCE_NOT_FOUND",
+          message: "Organization not found",
+        });
+      }
+      return clone(buildPlatformDetail(org));
+    },
+
+    async updatePlatformOrganization(
+      organizationId: number,
+      payload: Partial<{ name: string; baseCurrency: string }>,
+    ): Promise<PlatformOrganizationDetail> {
+      requireRole(["SUPER_ADMIN"], "update tenant organizations");
+      const org = state.platformOrganizations.find(
+        (item) => item.id === organizationId,
+      );
+      if (!org) {
+        throw new AppError({
+          status: 404,
+          code: "RESOURCE_NOT_FOUND",
+          message: "Organization not found",
+        });
+      }
+
+      const previousName = org.name;
+      const previousCurrency = org.baseCurrency;
+
+      if (payload.name !== undefined) {
+        const nextName = payload.name.trim();
+        if (!nextName) {
+          throw new Error("Organization name is required.");
+        }
+        if (nextName.toLowerCase() === "ledger platform") {
+          throw new AppError({
+            status: 422,
+            code: "RESERVED_ORGANIZATION_NAME",
+            message: "Organization name 'Ledger Platform' is reserved.",
+          });
+        }
+        if (
+          state.platformOrganizations.some(
+            (item) =>
+              item.id !== organizationId &&
+              item.name.toLowerCase() === nextName.toLowerCase(),
+          )
+        ) {
+          throw new AppError({
+            status: 422,
+            code: "ORGANIZATION_NAME_EXISTS",
+            message: "Organization name already exists.",
+          });
+        }
+        org.name = nextName;
+      }
+
+      if (payload.baseCurrency !== undefined) {
+        const nextCurrency = payload.baseCurrency.trim().toUpperCase();
+        if (!/^[A-Z]{3}$/.test(nextCurrency)) {
+          throw new AppError({
+            status: 422,
+            code: "INVALID_CURRENCY",
+            message: "Currency must be a 3-letter ISO code.",
+          });
+        }
+        if (
+          nextCurrency !== org.baseCurrency &&
+          org.postedEntryCount + org.draftEntryCount > 0
+        ) {
+          throw new AppError({
+            status: 422,
+            code: "BASE_CURRENCY_LOCKED",
+            message:
+              "Base currency cannot be changed after journal transactions have been created.",
+          });
+        }
+        org.baseCurrency = nextCurrency;
+      }
+
+      org.updatedAt = new Date().toISOString();
+      recordPlatformAudit("ORGANIZATION_UPDATED", org, null, {
+        previousName,
+        newName: org.name,
+        previousBaseCurrency: previousCurrency,
+        newBaseCurrency: org.baseCurrency,
+      });
+      persist();
+      return clone(buildPlatformDetail(org));
+    },
+
+    async updatePlatformOrganizationStatus(
+      organizationId: number,
+      payload: { status: "ACTIVE" | "SUSPENDED"; reason?: string },
+    ): Promise<PlatformOrganizationDetail> {
+      requireRole(["SUPER_ADMIN"], "change tenant organization status");
+      const org = state.platformOrganizations.find(
+        (item) => item.id === organizationId,
+      );
+      if (!org) {
+        throw new AppError({
+          status: 404,
+          code: "RESOURCE_NOT_FOUND",
+          message: "Organization not found",
+        });
+      }
+
+      const now = new Date().toISOString();
+      const trimmedReason = payload.reason?.trim() ?? "";
+
+      if (payload.status === "SUSPENDED") {
+        if (!trimmedReason) {
+          throw new AppError({
+            status: 422,
+            code: "SUSPENSION_REASON_REQUIRED",
+            message: "A reason is required when suspending an organization.",
+          });
+        }
+        if (org.status === "SUSPENDED") {
+          throw new Error("Organization is already suspended.");
+        }
+        const previousStatus = org.status;
+        org.status = "SUSPENDED";
+        org.suspendedAt = now;
+        org.suspendedReason = trimmedReason;
+        org.updatedAt = now;
+        recordPlatformAudit("ORGANIZATION_SUSPENDED", org, null, {
+          previousStatus,
+          reason: trimmedReason,
+        });
+        persist();
+        return clone(buildPlatformDetail(org));
+      }
+
+      if (org.status === "PENDING") {
+        throw new AppError({
+          status: 422,
+          code: "ORGANIZATION_PENDING",
+          message:
+            "Pending organization cannot be manually activated before onboarding completion.",
+        });
+      }
+      if (org.status === "ACTIVE") {
+        throw new Error("Organization is already active.");
+      }
+
+      const orgUsers = state.platformUsers.filter(
+        (u) => u.organizationId === org.id,
+      );
+      const activeAdmins = orgUsers.filter(
+        (u) => u.role === "ADMIN" && u.status === "ACTIVE",
+      );
+
+      let restoredStatus: OrganizationStatus;
+      if (orgUsers.length === 0) {
+        restoredStatus = "PENDING";
+      } else if (activeAdmins.length >= 1) {
+        restoredStatus = "ACTIVE";
+      } else {
+        throw new AppError({
+          status: 409,
+          code: "NO_ACTIVE_ADMIN",
+          message:
+            "Cannot reactivate organization without at least one active administrator. Enable a disabled administrator or complete a recovery invitation first.",
+        });
+      }
+
+      org.status = restoredStatus;
+      org.suspendedAt = null;
+      org.suspendedReason = null;
+      org.updatedAt = now;
+      recordPlatformAudit("ORGANIZATION_REACTIVATED", org, null, {
+        previousStatus: "SUSPENDED",
+        restoredStatus,
+      });
+      persist();
+      return clone(buildPlatformDetail(org));
+    },
+
+    async listPlatformOrganizationUsers(
+      organizationId: number,
+    ): Promise<PlatformOrganizationUser[]> {
+      requireRole(["SUPER_ADMIN"], "list organization users");
+      return clone(
+        state.platformUsers
+          .filter((u) => u.organizationId === organizationId)
+          .sort((a, b) => a.fullName.localeCompare(b.fullName))
+          .map((u) => ({
+            id: u.id,
+            email: u.email,
+            fullName: u.fullName,
+            role: u.role,
+            status: u.status,
+            createdAt: u.createdAt,
+          })),
+      );
+    },
+
+    async updatePlatformOrganizationUserStatus(
+      organizationId: number,
+      userId: number,
+      status: UserStatus,
+    ): Promise<PlatformOrganizationUser> {
+      requireRole(["SUPER_ADMIN"], "update organization user status");
+      const org = state.platformOrganizations.find(
+        (item) => item.id === organizationId,
+      );
+      const targetUser = state.platformUsers.find(
+        (u) => u.id === userId && u.organizationId === organizationId,
+      );
+      if (!org || !targetUser) {
+        throw new AppError({
+          status: 404,
+          code: "RESOURCE_NOT_FOUND",
+          message: "User not found in organization.",
+        });
+      }
+
+      const previousStatus = targetUser.status;
+      targetUser.status = status;
+      const now = new Date().toISOString();
+
+      if (status === "ACTIVE") {
+        for (const inv of state.platformInvitations) {
+          if (
+            inv.organizationId === organizationId &&
+            inv.targetUserId === targetUser.id &&
+            inv.acceptedAt === null &&
+            inv.supersededAt === null
+          ) {
+            inv.supersededAt = now;
+          }
+        }
+      }
+
+      if (previousStatus !== status) {
+        recordPlatformAudit(
+          status === "DISABLED"
+            ? "TENANT_USER_DISABLED"
+            : "TENANT_USER_ENABLED",
+          org,
+          targetUser,
+          { email: targetUser.email, role: targetUser.role },
+        );
+      }
+      persist();
+      return clone({
+        id: targetUser.id,
+        email: targetUser.email,
+        fullName: targetUser.fullName,
+        role: targetUser.role,
+        status: targetUser.status,
+        createdAt: targetUser.createdAt,
+      });
+    },
+
+    async createAdminRecoveryInvitation(
+      organizationId: number,
+      payload: { adminEmail: string },
+    ): Promise<RecoveryInvitationResult> {
+      requireRole(["SUPER_ADMIN"], "create admin recovery invitation");
+      const org = state.platformOrganizations.find(
+        (item) => item.id === organizationId,
+      );
+      if (!org) {
+        throw new AppError({
+          status: 404,
+          code: "RESOURCE_NOT_FOUND",
+          message: "Organization not found",
+        });
+      }
+
+      const normalizedEmail = payload.adminEmail.trim().toLowerCase();
+      const existing = state.platformUsers.find(
+        (u) => u.email.toLowerCase() === normalizedEmail,
+      );
+      let targetUserId: number | null = null;
+      let targetUser: MockPlatformUserRecord | null = null;
+      if (existing) {
+        if (existing.organizationId !== organizationId) {
+          throw new AppError({
+            status: 422,
+            code: "DUPLICATE_EMAIL",
+            message: "A user with this email already exists in another organization.",
+          });
+        }
+        if (existing.status === "ACTIVE") {
+          throw new AppError({
+            status: 422,
+            code: "USER_ALREADY_ACTIVE",
+            message: "A user with this email is already active in this organization.",
+          });
+        }
+        if (existing.role !== "ADMIN") {
+          throw new AppError({
+            status: 422,
+            code: "TARGET_USER_NOT_ADMIN",
+            message: "Existing disabled user does not hold ADMIN role.",
+          });
+        }
+        targetUserId = existing.id;
+        targetUser = existing;
+      }
+
+      const now = new Date().toISOString();
+      for (const inv of state.platformInvitations) {
+        if (
+          inv.organizationId === organizationId &&
+          inv.acceptedAt === null &&
+          inv.supersededAt === null &&
+          (inv.invitedEmail.toLowerCase() === normalizedEmail ||
+            (targetUserId !== null && inv.targetUserId === targetUserId) ||
+            (org.status === "PENDING" && inv.role === "ADMIN"))
+        ) {
+          inv.supersededAt = now;
+        }
+      }
+
+      const nextInviteId =
+        Math.max(...state.platformInvitations.map((i) => i.id), 100) + 1;
+      const expiresAt = new Date(
+        Date.now() + 7 * 24 * 60 * 60 * 1000,
+      ).toISOString();
+      const rawToken = `mock_recovery_${organizationId}_${nextInviteId}`;
+      state.platformInvitations.unshift({
+        id: nextInviteId,
+        organizationId,
+        invitedEmail: normalizedEmail,
+        role: "ADMIN",
+        purpose: "ADMIN_RECOVERY",
+        targetUserId,
+        invitationToken: rawToken,
+        expiresAt,
+        createdAt: now,
+        acceptedAt: null,
+        supersededAt: null,
+      });
+
+      recordPlatformAudit("ADMIN_RECOVERY_INVITED", org, targetUser, {
+        invitedEmail: normalizedEmail,
+        targetMode: targetUser ? "EXISTING_DISABLED_ADMIN" : "NEW_ADMIN_EMAIL",
+      });
+      persist();
+
+      return {
+        invitationId: nextInviteId,
+        organizationId,
+        invitedEmail: normalizedEmail,
+        role: "ADMIN",
+        purpose: "ADMIN_RECOVERY",
+        targetUserId,
+        invitationToken: rawToken,
+        expiresAt,
+        createdAt: now,
+      };
+    },
+
+    async listPlatformAuditLogs(
+      input: ListPlatformAuditInput,
+    ): Promise<PageResult<PlatformAuditLogItem>> {
+      requireRole(["SUPER_ADMIN"], "view platform audit logs");
+      const filtered = state.platformAuditLogs.filter((log) => {
+        if (input.action && log.action !== input.action) return false;
+        if (
+          input.targetOrganizationId !== undefined &&
+          log.targetOrganizationId !== input.targetOrganizationId
+        ) {
+          return false;
+        }
+        const dateOnly = log.createdAt.slice(0, 10);
+        if (input.fromDate && dateOnly < input.fromDate) return false;
+        if (input.toDate && dateOnly > input.toDate) return false;
+        return true;
+      });
+      const page = input.page ?? 1;
+      const size = input.size ?? 20;
+      const start = (page - 1) * size;
+      return {
+        page,
+        size,
+        totalElements: filtered.length,
+        totalPages: Math.max(1, Math.ceil(filtered.length / size)),
+        items: clone(filtered.slice(start, start + size)),
+      };
+    },
   };
 };

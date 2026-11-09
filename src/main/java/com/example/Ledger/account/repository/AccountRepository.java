@@ -1,6 +1,7 @@
 package com.example.Ledger.account.repository;
 
 import com.example.Ledger.account.model.Account;
+import com.example.Ledger.common.enums.OrganizationKind;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.repository.query.Param;
@@ -29,4 +30,17 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
     boolean existsByOrganizationIdAndAccountCodeIgnoreCase(Long organizationId, String accountCode);
 
     boolean existsByOrganizationIdAndAccountCodeIgnoreCaseAndIdNot(Long organizationId, String accountCode, Long id);
+
+    long countByOrganizationId(Long organizationId);
+
+    @Query("select count(a) from Account a where a.organization.kind = :kind")
+    long countByOrganizationKind(@Param("kind") OrganizationKind kind);
+
+    @Query("""
+            select a.organization.id, count(a), max(a.updatedAt)
+            from Account a
+            where a.organization.id in :orgIds
+            group by a.organization.id
+            """)
+    List<Object[]> summarizeAccountsByOrganizationIds(@Param("orgIds") Collection<Long> orgIds);
 }
