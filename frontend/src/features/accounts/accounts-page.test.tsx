@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthProvider, useAuth } from "../../app/auth-context";
 import { env } from "../../lib/env";
 import { ServiceContext } from "../../services/interfaces/service-context";
+import type { LedgerService } from "../../services/interfaces/ledger-service";
 import {
   createMockService,
   resetMockServiceState,
@@ -15,7 +16,7 @@ import {
 import type { AuthSession } from "../../types/domain";
 import { AccountsPage } from "./accounts-page";
 
-const session: AuthSession = {
+const baseSession: AuthSession = {
   token: "admin-token",
   expiresAt: "2099-12-31T23:59:59Z",
   user: {
@@ -27,13 +28,21 @@ const session: AuthSession = {
   },
 };
 
-const renderAccountsPage = () => {
+const renderAccountsPage = (
+  customService?: LedgerService,
+  role: "ADMIN" | "ACCOUNTANT" | "VIEWER" = "ADMIN",
+) => {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
       mutations: { retry: false },
     },
   });
+
+  const session: AuthSession = {
+    ...baseSession,
+    user: { ...baseSession.user, role },
+  };
 
   const SessionSetter = () => {
     const { setSession } = useAuth();
@@ -43,10 +52,12 @@ const renderAccountsPage = () => {
     return <AccountsPage />;
   };
 
+  const service = customService ?? createMockService(session);
+
   return render(
     <AuthProvider>
       <QueryClientProvider client={queryClient}>
-        <ServiceContext.Provider value={createMockService(session)}>
+        <ServiceContext.Provider value={service}>
           <MemoryRouter>
             <SessionSetter />
           </MemoryRouter>
@@ -64,14 +75,61 @@ describe("accounts page workflows", () => {
     vi.restoreAllMocks();
   });
 
-  it("hides account mutation controls in API mode and shows a read-only message", async () => {
-    env.mode = "api";
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-        mutations: { retry: false },
-      },
+  it("hides account mutation controls for non-admin users (ACCOUNTANT and VIEWER)", async () => {
+    const mockService = createMockService({
+      ...baseSession,
+      user: { ...baseSession.user, role: "ACCOUNTANT" },
     });
+
+    renderAccountsPage(mockService, "ACCOUNTANT");
+
+    expect(await screen.findByText("Cash & Equivalents")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "New account" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText(/edit cash & equivalents/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("allows admin to create, edit, and deactivate accounts in API mode", async () => {
+    env.mode = "api";
+
+    const createAccountMock = vi.fn(async () => ({
+      id: 2,
+      organizationId: 42,
+      accountCode: "1050",
+      name: "Savings",
+      accountType: "ASSET" as const,
+      status: "ACTIVE" as const,
+      parentAccountId: null,
+      createdAt: "2026-10-01T00:00:00Z",
+      updatedAt: "2026-10-02T00:00:00Z",
+    }));
+
+    const updateAccountMock = vi.fn(async () => ({
+      id: 1,
+      organizationId: 42,
+      accountCode: "1000",
+      name: "Operating Cash",
+      accountType: "ASSET" as const,
+      status: "ACTIVE" as const,
+      parentAccountId: null,
+      createdAt: "2026-10-01T00:00:00Z",
+      updatedAt: "2026-10-02T00:00:00Z",
+    }));
+
+    const deactivateAccountMock = vi.fn(async () => ({
+      id: 1,
+      organizationId: 42,
+      accountCode: "1000",
+      name: "Cash",
+      accountType: "ASSET" as const,
+      status: "INACTIVE" as const,
+      parentAccountId: null,
+      createdAt: "2026-10-01T00:00:00Z",
+      updatedAt: "2026-10-02T00:00:00Z",
+    }));
 
     const apiService = {
       login: vi.fn(),
@@ -82,8 +140,8 @@ describe("accounts page workflows", () => {
           organizationId: 42,
           accountCode: "1000",
           name: "Cash",
-          accountType: "ASSET",
-          status: "ACTIVE",
+          accountType: "ASSET" as const,
+          status: "ACTIVE" as const,
           parentAccountId: null,
           createdAt: "2026-10-01T00:00:00Z",
           updatedAt: "2026-10-02T00:00:00Z",
@@ -91,9 +149,9 @@ describe("accounts page workflows", () => {
       ]),
       getAccount: vi.fn(),
       getAccountBalance: vi.fn(),
-      createAccount: vi.fn(),
-      updateAccount: vi.fn(),
-      deactivateAccount: vi.fn(),
+      createAccount: createAccountMock,
+      updateAccount: updateAccountMock,
+      deactivateAccount: deactivateAccountMock,
       deleteAccount: vi.fn(),
       listJournalEntries: vi.fn(),
       getJournalEntry: vi.fn(),
@@ -110,7 +168,7 @@ describe("accounts page workflows", () => {
             accountId: 1,
             accountCode: "1000",
             accountName: "Cash",
-            accountType: "ASSET",
+            accountType: "ASSET" as const,
             debitBalance: "100.00",
             creditBalance: "0.00",
           },
@@ -123,33 +181,52 @@ describe("accounts page workflows", () => {
       listOrganizationUsers: vi.fn(),
       getOrganizationSettings: vi.fn(),
       listAuditLogs: vi.fn(),
-    } as any;
+    } as unknown as LedgerService;
 
-    render(
-      <AuthProvider>
-        <QueryClientProvider client={queryClient}>
-          <ServiceContext.Provider value={apiService}>
-            <MemoryRouter>
-              <AccountsPage />
-            </MemoryRouter>
-          </ServiceContext.Provider>
-        </QueryClientProvider>
-      </AuthProvider>,
-    );
+    renderAccountsPage(apiService, "ADMIN");
+    const user = userEvent.setup();
 
     expect(await screen.findByText("Cash")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "New account" }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/edit cash/i)).not.toBeInTheDocument();
-    expect(
-      screen.getByText(
-        /Read-only API mode: account mutation endpoints are not enabled yet\./i,
-      ),
-    ).toBeInTheDocument();
+
+    // Verify New Account is visible for Admin in API mode
+    const newAccountBtn = screen.getByRole("button", { name: "New account" });
+    expect(newAccountBtn).toBeInTheDocument();
+    await user.click(newAccountBtn);
+
+    await user.type(screen.getByLabelText("Account code"), "1050");
+    await user.type(screen.getByLabelText("Account name"), "Savings");
+    await user.click(screen.getByRole("button", { name: "Create account" }));
+
+    expect(createAccountMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountCode: "1050",
+        name: "Savings",
+      }),
+    );
+
+    // Verify Edit Account
+    await user.click(screen.getByLabelText("Edit Cash"));
+    const nameInput = screen.getByLabelText("Account name");
+    await user.clear(nameInput);
+    await user.type(nameInput, "Operating Cash");
+    await user.click(screen.getByRole("button", { name: "Save account" }));
+
+    expect(updateAccountMock).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        name: "Operating Cash",
+      }),
+    );
+
+    // Verify Deactivate Account
+    await user.click(screen.getByLabelText("Toggle Cash status"));
+    expect(deactivateAccountMock).toHaveBeenCalledWith(1);
+
+    // Verify Delete button does not exist (accounts cannot be deleted in double-entry systems)
+    expect(screen.queryByLabelText(/delete/i)).not.toBeInTheDocument();
   });
 
-  it("creates and edits an account, deactivates, and blocks deleting transacted accounts", async () => {
+  it("creates, edits, and deactivates an account in mock mode without delete action", async () => {
     renderAccountsPage();
     const user = userEvent.setup();
 
@@ -184,14 +261,7 @@ describe("accounts page workflows", () => {
       expect(within(cashRow).getByText("INACTIVE")).toBeInTheDocument();
     }
 
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-    await user.click(screen.getByLabelText("Delete Cash & Equivalents"));
-
-    expect(confirmSpy).toHaveBeenCalled();
-    expect(
-      await screen.findByText(
-        /Cannot delete an account that has transactions/i,
-      ),
-    ).toBeInTheDocument();
+    // Verify Delete button does not exist
+    expect(screen.queryByLabelText(/delete/i)).not.toBeInTheDocument();
   });
 });

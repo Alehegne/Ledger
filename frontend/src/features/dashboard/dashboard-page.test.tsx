@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { env } from "../../lib/env";
 import { ServiceContext } from "../../services/interfaces/service-context";
+import type { LedgerService } from "../../services/interfaces/ledger-service";
 import { DashboardPage } from "./dashboard-page";
 
 describe("dashboard page overview handling", () => {
@@ -66,7 +67,7 @@ describe("dashboard page overview handling", () => {
       listOrganizationUsers: vi.fn(),
       getOrganizationSettings: vi.fn(),
       listAuditLogs: vi.fn(),
-    } as any;
+    } as unknown as LedgerService;
 
     render(
       <QueryClientProvider client={queryClient}>
@@ -130,7 +131,7 @@ describe("dashboard page overview handling", () => {
       listOrganizationUsers: vi.fn(),
       getOrganizationSettings: vi.fn(),
       listAuditLogs: vi.fn(),
-    } as any;
+    } as unknown as LedgerService;
 
     render(
       <QueryClientProvider client={queryClient}>

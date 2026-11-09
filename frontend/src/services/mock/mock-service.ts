@@ -11,6 +11,7 @@ import type {
   OrganizationUser,
   OverviewSnapshot,
   PageResult,
+  Role,
   TrialBalanceReport,
 } from "../../types/domain";
 import type {
@@ -196,7 +197,7 @@ const journalSeed: JournalEntry[] = [
   },
 ];
 
-const userSeed = [
+const userSeed: OrganizationUser[] = [
   {
     id: 10,
     email: "alex@northstar.co",
@@ -474,17 +475,30 @@ export const createMockService = (
     }
   };
 
-  const makeSession = (): AuthSession => ({
+  const makeSession = (user?: OrganizationUser): AuthSession => ({
     token: "mock-token-123",
     expiresAt: "2099-12-31T23:59:59Z",
-    user: {
-      id: 10,
-      email: "alex@northstar.co",
-      fullName: "Alex Morgan",
-      role: "ADMIN",
-      organizationId: 42,
-      organizationName: "Northstar Co.",
-    },
+    refreshToken: "mock-refresh-token-123",
+    refreshExpiresAt: "2099-12-31T23:59:59Z",
+    user: user
+      ? {
+          id: user.id,
+          email: user.email,
+          fullName: user.fullName,
+          role: user.role,
+          organizationId: 42,
+          organizationName: state.settings.name,
+          baseCurrency: state.settings.baseCurrency,
+        }
+      : {
+          id: 10,
+          email: "alex@northstar.co",
+          fullName: "Alex Morgan",
+          role: "ADMIN",
+          organizationId: 42,
+          organizationName: state.settings.name,
+          baseCurrency: state.settings.baseCurrency,
+        },
   });
 
   const activeSession = currentSession ?? makeSession();
@@ -538,6 +552,21 @@ export const createMockService = (
   return {
     async login(): Promise<AuthSession> {
       return makeSession();
+    },
+
+    async refreshSession(refreshToken: string): Promise<AuthSession> {
+      void refreshToken;
+      return {
+        ...activeSession,
+        token: "mock-token-refreshed",
+        expiresAt: "2099-12-31T23:59:59Z",
+        refreshToken: "mock-refresh-token-rotated",
+        refreshExpiresAt: "2099-12-31T23:59:59Z",
+      };
+    },
+
+    async logout(refreshToken?: string): Promise<void> {
+      void refreshToken;
     },
 
     async getOverview(): Promise<OverviewSnapshot> {
@@ -929,11 +958,25 @@ export const createMockService = (
       return clone(posted);
     },
 
-    async reverseJournalEntry(entryId: number): Promise<JournalEntry> {
+    async reverseJournalEntry(
+      entryId: number,
+      payload?: { reason?: string },
+    ): Promise<JournalEntry> {
       requireRole(["ADMIN", "ACCOUNTANT"], "reverse journal entries");
       const entry = await this.getJournalEntry(entryId);
+      if (entry.status !== "POSTED") {
+        throw new Error("Only posted journal entries can be reversed.");
+      }
+      if (entry.reversedByEntryId) {
+        throw new Error("This journal entry has already been reversed.");
+      }
+      if (entry.reversesEntryId) {
+        throw new Error("A reversal journal entry cannot be reversed.");
+      }
+
       const nextId =
         Math.max(...state.journalEntries.map((item) => item.id), 0) + 1;
+      const cleanReason = payload?.reason?.trim() || `Reversal of entry #${entry.id}`;
 
       const reversedLines: JournalEntry["lines"] = entry.lines.map((line) => ({
         ...line,
@@ -958,15 +1001,29 @@ export const createMockService = (
       const reverse: JournalEntry = {
         ...entry,
         id: nextId,
-        description: `${entry.description} reversal`,
+        description: `Reversal of: ${entry.description} (reversal)`,
         status: "POSTED",
-        reference: entry.reference ? `${entry.reference}-REV` : "REVERSAL",
-        postedByUserId: 10,
+        reference: entry.reference ? `REV-${entry.reference}` : "REVERSAL",
+        postedByUserId: currentUserId,
         postedAt: new Date().toISOString(),
         totalDebits: toMoney(debitTotal),
         totalCredits: toMoney(creditTotal),
         lines: reversedLines,
+        reversesEntryId: entry.id,
+        reversalReason: cleanReason,
+        reversedByEntryId: null,
       };
+
+      // Update original entry
+      const origIndex = state.journalEntries.findIndex((item) => item.id === entryId);
+      if (origIndex >= 0) {
+        state.journalEntries[origIndex] = {
+          ...state.journalEntries[origIndex],
+          reversedByEntryId: nextId,
+          reversalReason: cleanReason,
+        };
+      }
+
       state.journalEntries.unshift(reverse);
       persist();
       return clone(reverse);
@@ -1171,6 +1228,54 @@ export const createMockService = (
       return clone(invitation);
     },
 
+    async listPendingInvitations(): Promise<Invitation[]> {
+      requireRole(["ADMIN"], "view pending invitations");
+      return clone(state.invitations);
+    },
+
+    async revokeInvitation(invitationId: number): Promise<void> {
+      requireRole(["ADMIN"], "revoke invitations");
+      const index = state.invitations.findIndex(
+        (inv) => inv.id === invitationId,
+      );
+      if (index === -1) {
+        throw new Error("Invitation not found.");
+      }
+      state.invitations.splice(index, 1);
+      persist();
+    },
+
+    async acceptInvitation(payload): Promise<{ message: string }> {
+      const normalizedEmail = payload.email.trim().toLowerCase();
+      const invitation = state.invitations.find(
+        (inv) =>
+          inv.invitedEmail.toLowerCase() === normalizedEmail &&
+          inv.invitationToken === payload.token,
+      );
+      if (!invitation) {
+        throw new Error("Invitation is invalid or expired.");
+      }
+      const existingUser = state.users.find(
+        (u) => u.email.toLowerCase() === normalizedEmail,
+      );
+      if (existingUser) {
+        throw new Error("A user with this email already exists.");
+      }
+      const nextUserId = Math.max(...state.users.map((u) => u.id), 0) + 1;
+      state.users.push({
+        id: nextUserId,
+        email: normalizedEmail,
+        fullName: payload.fullName.trim(),
+        role: invitation.role,
+        invitationStatus: "ACTIVE",
+      });
+      state.invitations = state.invitations.filter(
+        (inv) => inv.id !== invitation.id,
+      );
+      persist();
+      return { message: "Invitation accepted successfully." };
+    },
+
     async listOrganizationUsers(): Promise<OrganizationUser[]> {
       requireRole(["ADMIN"], "view organization users");
       return clone(state.users).map((user) => ({
@@ -1180,6 +1285,44 @@ export const createMockService = (
         role: user.role,
         invitationStatus: user.invitationStatus,
       }));
+    },
+
+    async updateUserRole(
+      userId: number,
+      role: Role,
+    ): Promise<OrganizationUser> {
+      requireRole(["ADMIN"], "update user role");
+      const targetUser = state.users.find((u) => u.id === userId);
+      if (!targetUser) {
+        throw new Error("User not found");
+      }
+
+      if (targetUser.role === "ADMIN" && role !== "ADMIN") {
+        const adminCount = state.users.filter((u) => u.role === "ADMIN").length;
+        if (adminCount <= 1) {
+          throw new Error("Cannot demote the last administrator in the organization");
+        }
+      }
+
+      targetUser.role = role;
+      state.auditLogs.unshift({
+        id: state.auditLogs.length + 1,
+        actor: activeSession.user.email ?? "Admin",
+        action: "USER_ROLE_UPDATED",
+        entityType: "USER",
+        entityId: String(userId),
+        createdAt: new Date().toISOString(),
+        metadata: JSON.stringify({ role }),
+      });
+      persist();
+
+      return {
+        id: targetUser.id,
+        email: targetUser.email,
+        fullName: targetUser.fullName,
+        role: targetUser.role,
+        invitationStatus: targetUser.invitationStatus,
+      };
     },
 
     async getOrganizationSettings(): Promise<OrganizationSettings> {
@@ -1241,5 +1384,6 @@ export const createMockService = (
         items: clone(items),
       };
     },
+
   };
 };

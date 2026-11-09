@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AuthSession } from "../../types/domain";
-import { createApiService } from "./api-service";
+import { type ApiHttp, createApiService } from "./api-service";
 
 const adminSession: AuthSession = {
   token: "admin-token",
@@ -26,7 +26,7 @@ const viewerSession: AuthSession = {
 
 describe("api service foundational mapping", () => {
   it("maps the backend login response into the frontend session model", async () => {
-    const http = vi.fn(async (path: string, init?: RequestInit) => {
+    const http = vi.fn<ApiHttp>(async (path, init) => {
       expect(path).toBe("/auth/login");
       expect(init).toMatchObject({ method: "POST" });
       return {
@@ -42,7 +42,7 @@ describe("api service foundational mapping", () => {
       };
     });
 
-    const service = createApiService(http as any, adminSession);
+    const service = createApiService(http, adminSession);
     await expect(
       service.login("admin@ledger.test", "Admin123!"),
     ).resolves.toEqual({
@@ -59,20 +59,20 @@ describe("api service foundational mapping", () => {
   });
 
   it("rejects malformed login payloads instead of trusting the cast", async () => {
-    const http = vi.fn(async () => ({
+    const http = vi.fn<ApiHttp>(async () => ({
       token: "jwt-token",
       expiresAt: "2026-10-14T12:00:00Z",
       user: { id: 7, email: "admin@ledger.test", role: "ADMIN" },
     }));
 
-    const service = createApiService(http as any, adminSession);
+    const service = createApiService(http, adminSession);
     await expect(
       service.login("admin@ledger.test", "Admin123!"),
     ).rejects.toThrow(/Invalid login response/i);
   });
 
   it("maps organization settings and sends partial patch updates to the verified backend contract", async () => {
-    const http = vi.fn(async (path: string, init?: RequestInit) => {
+    const http = vi.fn<ApiHttp>(async (path, init) => {
       if (path === "/organizations/me" && (!init || init.method === "GET")) {
         return {
           id: 42,
@@ -98,7 +98,7 @@ describe("api service foundational mapping", () => {
       throw new Error(`Unexpected path: ${path}`);
     });
 
-    const service = createApiService(http as any, adminSession);
+    const service = createApiService(http, adminSession);
 
     await expect(service.getOrganizationSettings()).resolves.toEqual({
       id: 42,
@@ -121,20 +121,20 @@ describe("api service foundational mapping", () => {
   });
 
   it("rejects malformed organization settings payloads instead of trusting the cast", async () => {
-    const http = vi.fn(async () => ({
+    const http = vi.fn<ApiHttp>(async () => ({
       id: 42,
       name: "Northstar Co.",
       createdAt: "2024-08-01T00:00:00Z",
     }));
 
-    const service = createApiService(http as any, adminSession);
+    const service = createApiService(http, adminSession);
     await expect(service.getOrganizationSettings()).rejects.toThrow(
       /Invalid organization settings response/i,
     );
   });
 
   it("filters unsupported keys before patching organization settings", async () => {
-    const http = vi.fn(async (path: string, init?: RequestInit) => {
+    const http = vi.fn<ApiHttp>(async (path, init) => {
       if (path === "/organizations/me" && init?.method === "PATCH") {
         expect(JSON.parse(String(init.body))).toEqual({
           name: "Updated Co.",
@@ -160,7 +160,7 @@ describe("api service foundational mapping", () => {
       throw new Error(`Unexpected path: ${path}`);
     });
 
-    const service = createApiService(http as any, adminSession);
+    const service = createApiService(http, adminSession);
 
     await expect(
       service.updateOrganizationSettings({
@@ -176,7 +176,7 @@ describe("api service foundational mapping", () => {
   });
 
   it("maps account list and detail responses to the frontend account model", async () => {
-    const http = vi.fn(async (path: string) => {
+    const http = vi.fn<ApiHttp>(async (path) => {
       if (path === "/accounts") {
         return [
           {
@@ -219,7 +219,7 @@ describe("api service foundational mapping", () => {
       throw new Error(`Unexpected path: ${path}`);
     });
 
-    const service = createApiService(http as any, adminSession);
+    const service = createApiService(http, adminSession);
 
     await expect(service.listAccounts()).resolves.toEqual([
       {
@@ -251,7 +251,7 @@ describe("api service foundational mapping", () => {
   });
 
   it("rejects malformed account payloads instead of trusting the cast", async () => {
-    const http = vi.fn(async () => ({
+    const http = vi.fn<ApiHttp>(async () => ({
       id: 1,
       organizationId: 42,
       accountCode: "1000",
@@ -262,14 +262,14 @@ describe("api service foundational mapping", () => {
       updatedAt: "2026-10-02T00:00:00Z",
     }));
 
-    const service = createApiService(http as any, adminSession);
+    const service = createApiService(http, adminSession);
     await expect(service.getAccount(1)).rejects.toThrow(
       /Invalid account response/i,
     );
   });
 
   it("sends the exact journal list query params and rejects malformed journal entries", async () => {
-    const http = vi.fn(async (path: string) => {
+    const http = vi.fn<ApiHttp>(async (path) => {
       expect(path).toBe("/journal-entries?status=POSTED&page=0&size=10");
       return {
         page: 0,
@@ -307,7 +307,7 @@ describe("api service foundational mapping", () => {
       };
     });
 
-    const service = createApiService(http as any, adminSession);
+    const service = createApiService(http, adminSession);
     const result = await service.listJournalEntries({
       status: "POSTED",
       page: 1,
@@ -318,42 +318,84 @@ describe("api service foundational mapping", () => {
     expect(result.totalElements).toBe(1);
     expect(result.items[0].totalDebits).toBe("2000");
     expect(result.items[0].lines[0].amount).toBe("2000");
+  });
 
-    http.mockImplementationOnce(
-      async () =>
-        ({
-          page: 0,
-          size: 10,
-          totalElements: 1,
-          totalPages: 1,
-          items: [
-            {
-              id: 101,
-              organizationId: 42,
-              transactionDate: "2026-10-01",
-              description: "Sample",
-              reference: "REF-1",
-              status: "POSTED",
-              createdByUserId: 10,
-              postedByUserId: 10,
-              postedAt: "2026-10-01T00:00:00Z",
-              totalDebits: 2000,
-              totalCredits: 2000,
-              lines: [{}],
-              createdAt: "2026-10-01T00:00:00Z",
-              updatedAt: "2026-10-01T00:00:00Z",
-            },
-          ],
-        }) as any,
-    );
+  it("preserves refresh tokens on login/refresh and sends logout revocation", async () => {
+    const http = vi.fn<ApiHttp>(async (path, init) => {
+      if (path === "/auth/refresh") {
+        expect(init).toMatchObject({ method: "POST" });
+        expect(JSON.parse(String(init?.body))).toEqual({
+          refreshToken: "refresh-1",
+        });
+        return {
+          token: "jwt-2",
+          expiresAt: "2026-11-10T12:15:00Z",
+          refreshToken: "refresh-2",
+          refreshExpiresAt: "2026-11-17T12:00:00Z",
+          user: {
+            id: 7,
+            email: "admin@ledger.test",
+            fullName: "Admin User",
+            role: "ADMIN",
+            organizationId: 42,
+          },
+        };
+      }
 
+      if (path === "/auth/logout") {
+        expect(init).toMatchObject({ method: "POST" });
+        expect(JSON.parse(String(init?.body))).toEqual({
+          refreshToken: "refresh-2",
+        });
+        return undefined;
+      }
+
+      throw new Error(`Unexpected path: ${path}`);
+    });
+
+    const service = createApiService(http, adminSession);
+    const refreshed = await service.refreshSession("refresh-1");
+    expect(refreshed.token).toBe("jwt-2");
+    expect(refreshed.refreshToken).toBe("refresh-2");
+    expect(refreshed.refreshExpiresAt).toBe("2026-11-17T12:00:00Z");
+
+    await expect(service.logout("refresh-2")).resolves.toBeUndefined();
+  });
+
+  it("rejects malformed journal entries", async () => {
+    const http = vi.fn<ApiHttp>(async () => ({
+      page: 0,
+      size: 10,
+      totalElements: 1,
+      totalPages: 1,
+      items: [
+        {
+          id: 101,
+          organizationId: 42,
+          transactionDate: "2026-10-01",
+          description: "Sample",
+          reference: "REF-1",
+          status: "POSTED",
+          createdByUserId: 10,
+          postedByUserId: 10,
+          postedAt: "2026-10-01T00:00:00Z",
+          totalDebits: 2000,
+          totalCredits: 2000,
+          lines: [{}],
+          createdAt: "2026-10-01T00:00:00Z",
+          updatedAt: "2026-10-01T00:00:00Z",
+        },
+      ],
+    }));
+
+    const service = createApiService(http, adminSession);
     await expect(
       service.listJournalEntries({ status: "POSTED", page: 1, size: 10 }),
     ).rejects.toThrow(/Invalid journal entry response/i);
   });
 
   it("forces viewer journal listing to posted status", async () => {
-    const http = vi.fn(async (path: string) => {
+    const http = vi.fn<ApiHttp>(async (path) => {
       expect(path).toContain("status=POSTED");
       return {
         page: 0,
@@ -364,12 +406,12 @@ describe("api service foundational mapping", () => {
       };
     });
 
-    const service = createApiService(http as any, viewerSession);
+    const service = createApiService(http, viewerSession);
     await service.listJournalEntries({ status: "DRAFT", page: 1, size: 20 });
   });
 
   it("maps the dashboard overview contract into the frontend snapshot", async () => {
-    const http = vi.fn(async (path: string) => {
+    const http = vi.fn<ApiHttp>(async (path) => {
       expect(path).toBe("/api/dashboard/overview");
       return {
         asOfDate: "2026-10-15",
@@ -418,7 +460,7 @@ describe("api service foundational mapping", () => {
       };
     });
 
-    const service = createApiService(http as any, adminSession);
+    const service = createApiService(http, adminSession);
     await expect(service.getOverview()).resolves.toEqual({
       asOfDate: "2026-10-15",
       totalAssets: "1250.5",
@@ -461,13 +503,16 @@ describe("api service foundational mapping", () => {
           ],
           createdAt: "2026-10-15T00:00:00Z",
           updatedAt: "2026-10-15T00:00:00Z",
+          reversedByEntryId: null,
+          reversesEntryId: null,
+          reversalReason: null,
         },
       ],
     });
   });
 
   it("maps empty totals and recent entries as zero-values instead of crashing", async () => {
-    const http = vi.fn(async () => ({
+    const http = vi.fn<ApiHttp>(async () => ({
       asOfDate: "2026-10-15",
       totalAssets: 0,
       totalRevenue: 0,
@@ -477,7 +522,7 @@ describe("api service foundational mapping", () => {
       recentEntries: [],
     }));
 
-    const service = createApiService(http as any, adminSession);
+    const service = createApiService(http, adminSession);
     await expect(service.getOverview()).resolves.toEqual({
       asOfDate: "2026-10-15",
       totalAssets: "0",
@@ -490,7 +535,7 @@ describe("api service foundational mapping", () => {
   });
 
   it("rejects malformed overview payloads instead of accepting invalid data", async () => {
-    const http = vi.fn(async () => ({
+    const http = vi.fn<ApiHttp>(async () => ({
       asOfDate: "2026-10-15",
       totalAssets: 0,
       totalRevenue: 0,
@@ -500,14 +545,14 @@ describe("api service foundational mapping", () => {
       recentEntries: [{ id: "bad" }],
     }));
 
-    const service = createApiService(http as any, adminSession);
+    const service = createApiService(http, adminSession);
     await expect(service.getOverview()).rejects.toThrow(
       /Invalid journal entry response/i,
     );
   });
 
   it("maps general ledger monetary fields as strings and page to 1-based", async () => {
-    const http = vi.fn(async (path: string) => {
+    const http = vi.fn<ApiHttp>(async (path) => {
       expect(path).toBe(
         "/api/reports/general-ledger?accountId=1&fromDate=2026-10-01&toDate=2026-10-31&page=0&size=5",
       );
@@ -536,7 +581,7 @@ describe("api service foundational mapping", () => {
       };
     });
 
-    const service = createApiService(http as any, adminSession);
+    const service = createApiService(http, adminSession);
     const result = await service.getGeneralLedger({
       accountId: 1,
       fromDate: "2026-10-01",
@@ -553,7 +598,7 @@ describe("api service foundational mapping", () => {
   });
 
   it("maps trial balance payloads and rejects malformed report responses", async () => {
-    const http = vi.fn(async (path: string) => {
+    const http = vi.fn<ApiHttp>(async (path) => {
       expect(path).toBe("/api/reports/trial-balance?asOfDate=2026-10-14");
       return {
         asOfDate: "2026-10-14",
@@ -573,7 +618,7 @@ describe("api service foundational mapping", () => {
       };
     });
 
-    const service = createApiService(http as any, adminSession);
+    const service = createApiService(http, adminSession);
     const result = await service.getTrialBalance("2026-10-14");
 
     expect(result.asOfDate).toBe("2026-10-14");
@@ -581,18 +626,13 @@ describe("api service foundational mapping", () => {
     expect(result.accounts[0].debitBalance).toBe("500");
     expect(result.balanced).toBe(false);
 
-    http.mockImplementationOnce(
-      async () =>
-        ({
-          asOfDate: "2026-10-14",
-          accounts: [
-            { accountId: 1, accountCode: "1000", accountName: "Cash" },
-          ],
-          totalDebits: 500,
-          totalCredits: 0,
-          balanced: false,
-        }) as any,
-    );
+    http.mockImplementationOnce(async () => ({
+      asOfDate: "2026-10-14",
+      accounts: [{ accountId: 1, accountCode: "1000", accountName: "Cash" }],
+      totalDebits: 500,
+      totalCredits: 0,
+      balanced: false,
+    }));
 
     await expect(service.getTrialBalance("2026-10-14")).rejects.toThrow(
       /Invalid trial balance response/i,
@@ -600,7 +640,7 @@ describe("api service foundational mapping", () => {
   });
 
   it("creates journal drafts through the verified backend endpoint and maps the response", async () => {
-    const http = vi.fn(async (path: string, init?: RequestInit) => {
+    const http = vi.fn<ApiHttp>(async (path, init) => {
       expect(path).toBe("/journal-entries");
       expect(init).toMatchObject({ method: "POST" });
       expect(JSON.parse(String(init?.body))).toEqual({
@@ -650,7 +690,7 @@ describe("api service foundational mapping", () => {
       };
     });
 
-    const service = createApiService(http as any, adminSession);
+    const service = createApiService(http, adminSession);
     await expect(
       service.createJournalDraft({
         transactionDate: "2026-10-15",
@@ -671,7 +711,7 @@ describe("api service foundational mapping", () => {
   });
 
   it("creates invitations through the admin-only user invitation contract and maps the response", async () => {
-    const http = vi.fn(async (path: string, init?: RequestInit) => {
+    const http = vi.fn<ApiHttp>(async (path, init) => {
       expect(path).toBe("/users/invite");
       expect(init).toMatchObject({ method: "POST" });
       expect(JSON.parse(String(init?.body))).toEqual({
@@ -690,7 +730,7 @@ describe("api service foundational mapping", () => {
       };
     });
 
-    const service = createApiService(http as any, adminSession);
+    const service = createApiService(http, adminSession);
     await expect(
       service.createInvitation({
         email: "new.user@northstar.co",
@@ -708,7 +748,7 @@ describe("api service foundational mapping", () => {
   });
 
   it("lists organization users from the verified user directory endpoint", async () => {
-    const http = vi.fn(async (path: string) => {
+    const http = vi.fn<ApiHttp>(async (path) => {
       expect(path).toBe("/users");
       return [
         {
@@ -728,7 +768,7 @@ describe("api service foundational mapping", () => {
       ];
     });
 
-    const service = createApiService(http as any, adminSession);
+    const service = createApiService(http, adminSession);
     await expect(service.listOrganizationUsers()).resolves.toEqual([
       {
         id: 14,
@@ -746,4 +786,5 @@ describe("api service foundational mapping", () => {
       },
     ]);
   });
+
 });

@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
-import { useEffect } from "react";
-import { MemoryRouter } from "react-router-dom";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AuthProvider, useAuth } from "../../app/auth-context";
+import { AuthProvider } from "../../app/auth-context";
 import { env } from "../../lib/env";
+import type { LedgerService } from "../../services/interfaces/ledger-service";
+import { ServiceContext } from "../../services/interfaces/service-context";
+import { createMockService } from "../../services/mock/mock-service";
+import type { AuthSession } from "../../types/domain";
 import { AppShell } from "./app-shell";
 
 describe("app shell mode indicators", () => {
@@ -14,29 +17,22 @@ describe("app shell mode indicators", () => {
     vi.restoreAllMocks();
   });
 
-  const renderShell = (sessionOverride?: { token: string; expiresAt: string; user: any } | null) => {
-    const TestHarness = () => {
-      const { setSession } = useAuth();
-
-      useEffect(() => {
-        if (sessionOverride) {
-          setSession(sessionOverride);
-        } else {
-          setSession(null);
-        }
-      }, [sessionOverride, setSession]);
-
-      return (
-        <AppShell>
-          <div>Body content</div>
-        </AppShell>
+  const renderShell = (sessionOverride?: AuthSession | null) => {
+    if (sessionOverride) {
+      localStorage.setItem(
+        "ledger.frontend.auth.session",
+        JSON.stringify(sessionOverride),
       );
-    };
+    } else {
+      localStorage.removeItem("ledger.frontend.auth.session");
+    }
 
     render(
       <AuthProvider>
         <MemoryRouter>
-          <TestHarness />
+          <AppShell>
+            <div>Body content</div>
+          </AppShell>
         </MemoryRouter>
       </AuthProvider>,
     );
@@ -84,4 +80,56 @@ describe("app shell mode indicators", () => {
 
     expect(screen.getByText(/demo mode/i)).toBeInTheDocument();
   });
+
+  it("revokes the backend refresh token on sign out before clearing local session", async () => {
+    env.mode = "api";
+    const session: AuthSession = {
+      token: "jwt-1",
+      expiresAt: "2099-12-31T23:59:59Z",
+      refreshToken: "refresh-token-xyz",
+      user: {
+        id: 10,
+        email: "admin@northstar.co",
+        fullName: "Admin User",
+        role: "ADMIN",
+        organizationId: 42,
+      },
+    };
+    localStorage.setItem("ledger.frontend.auth.session", JSON.stringify(session));
+
+    const logoutSpy = vi.fn<LedgerService["logout"]>(async () => undefined);
+    const service: LedgerService = {
+      ...createMockService(session),
+      logout: logoutSpy,
+    };
+
+    render(
+      <AuthProvider>
+        <ServiceContext.Provider value={service}>
+          <MemoryRouter initialEntries={["/"]}>
+            <Routes>
+              <Route
+                path="/"
+                element={
+                  <AppShell>
+                    <div>Workspace body</div>
+                  </AppShell>
+                }
+              />
+              <Route path="/login" element={<div>Login screen</div>} />
+            </Routes>
+          </MemoryRouter>
+        </ServiceContext.Provider>
+      </AuthProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+    await waitFor(() => {
+      expect(logoutSpy).toHaveBeenCalledWith("refresh-token-xyz");
+      expect(screen.getByText("Login screen")).toBeInTheDocument();
+    });
+    expect(localStorage.getItem("ledger.frontend.auth.session")).toBeNull();
+  });
+
 });

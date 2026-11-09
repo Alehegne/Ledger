@@ -1,8 +1,9 @@
 import { type FormEvent, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Power, Trash2, X } from "lucide-react";
+import { Pencil, Plus, Power, X } from "lucide-react";
 import { useAuth } from "../../app/auth-context";
-import { env } from "../../lib/env";
+import { useToast } from "../../app/toast-store";
+import { getErrorMessage } from "../../lib/errors";
 import { decimal, formatMoney } from "../../lib/money";
 import { useLedgerService } from "../../services/interfaces/service-context";
 import type { Account } from "../../types/domain";
@@ -31,18 +32,12 @@ const defaultFormState: AccountFormState = {
   parentAccountId: "",
 };
 
-const toErrorMessage = (error: unknown) =>
-  error instanceof Error
-    ? error.message
-    : "Something went wrong. Please try again.";
-
 export const AccountsPage = () => {
   const service = useLedgerService();
   const queryClient = useQueryClient();
   const { session } = useAuth();
-  const canManageAccounts = ["ADMIN", "ACCOUNTANT"].includes(
-    session?.user.role ?? "",
-  );
+  const { showSuccess } = useToast();
+  const canManageAccounts = session?.user.role === "ADMIN";
   const [formState, setFormState] =
     useState<AccountFormState>(defaultFormState);
   const [editingAccountId, setEditingAccountId] = useState<number | null>(null);
@@ -86,6 +81,7 @@ export const AccountsPage = () => {
     onSuccess: async () => {
       await invalidateAccountingViews();
       setSuccessMessage("Account created successfully.");
+      showSuccess("Account created successfully.");
     },
   });
 
@@ -106,14 +102,16 @@ export const AccountsPage = () => {
     onSuccess: async () => {
       await invalidateAccountingViews();
       setSuccessMessage("Account updated successfully.");
+      showSuccess("Account updated successfully.");
     },
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (accountId: number) => service.deleteAccount(accountId),
+  const deactivateMutation = useMutation({
+    mutationFn: (accountId: number) => service.deactivateAccount(accountId),
     onSuccess: async () => {
       await invalidateAccountingViews();
-      setSuccessMessage("Account deleted successfully.");
+      setSuccessMessage("Account deactivated successfully.");
+      showSuccess("Account deactivated successfully.");
     },
   });
 
@@ -207,7 +205,7 @@ export const AccountsPage = () => {
       }
       resetForm();
     } catch (error) {
-      setFormError(toErrorMessage(error));
+      setFormError(getErrorMessage(error));
     }
   };
 
@@ -215,37 +213,25 @@ export const AccountsPage = () => {
     setFormError(null);
     setSuccessMessage(null);
     try {
-      await updateMutation.mutateAsync({
-        accountId: account.id,
-        payload: {
-          status: account.status === "ACTIVE" ? "INACTIVE" : "ACTIVE",
-        },
-      });
+      if (account.status === "ACTIVE") {
+        await deactivateMutation.mutateAsync(account.id);
+      } else {
+        await updateMutation.mutateAsync({
+          accountId: account.id,
+          payload: {
+            status: "ACTIVE",
+          },
+        });
+      }
     } catch (error) {
-      setFormError(toErrorMessage(error));
-    }
-  };
-
-  const handleDelete = async (account: Account) => {
-    setFormError(null);
-    setSuccessMessage(null);
-    const confirmed = window.confirm(
-      `Delete account ${account.accountCode} - ${account.name}? This action cannot be undone.`,
-    );
-    if (!confirmed) {
-      return;
-    }
-    try {
-      await deleteMutation.mutateAsync(account.id);
-    } catch (error) {
-      setFormError(toErrorMessage(error));
+      setFormError(getErrorMessage(error));
     }
   };
 
   const isMutating =
     createMutation.isPending ||
     updateMutation.isPending ||
-    deleteMutation.isPending;
+    deactivateMutation.isPending;
 
   if (isLoading) {
     return (
@@ -258,7 +244,7 @@ export const AccountsPage = () => {
   if (isError) {
     return (
       <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
-        Failed to load accounts: {toErrorMessage(error)}
+        Failed to load accounts: {getErrorMessage(error)}
       </div>
     );
   }
@@ -419,12 +405,6 @@ export const AccountsPage = () => {
         </div>
       ) : null}
 
-      {env.mode === "api" ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-          Read-only API mode: account mutation endpoints are not enabled yet.
-        </div>
-      ) : null}
-
       {formError && !formVisible ? (
         <div className="feedback-error" role="alert">
           {formError}
@@ -500,15 +480,6 @@ export const AccountsPage = () => {
                           disabled={isMutating}
                         >
                           <Power className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(account)}
-                          className="btn-danger p-2"
-                          aria-label={`Delete ${account.name}`}
-                          disabled={isMutating}
-                        >
-                          <Trash2 className="h-4 w-4" />
                         </button>
                       </div>
                     </td>

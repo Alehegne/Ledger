@@ -8,21 +8,26 @@ import {
 import { AppProviders } from "./app/providers";
 import { useAuth } from "./app/auth-context";
 import { RequireAuth, RequireRole } from "./app/route-guards";
+import { ErrorBoundary } from "./components/error-boundary";
 import { AppShell } from "./components/layout/app-shell";
 import { AccessDeniedPage } from "./features/auth/access-denied-page";
 import { NotFoundPage } from "./features/auth/not-found-page";
 import { LoginPage } from "./features/auth/login-page";
+import { AcceptInvitationPage } from "./features/auth/accept-invitation-page";
 import { DashboardPage } from "./features/dashboard/dashboard-page";
 import { AccountsPage } from "./features/accounts/accounts-page";
 import { JournalPage } from "./features/journal/journal-page";
 import { ReportsPage } from "./features/reports/reports-page";
 import { OrganizationPage } from "./features/organization/organization-page";
+import { AuditPage } from "./features/audit/audit-page";
 
 const ProtectedLayout = () => {
   return (
     <RequireAuth>
       <AppShell>
-        <Outlet />
+        <ErrorBoundary>
+          <Outlet />
+        </ErrorBoundary>
       </AppShell>
     </RequireAuth>
   );
@@ -40,11 +45,16 @@ const PublicLayout = () => {
 
 function App() {
   return (
-    <AppProviders>
-      <BrowserRouter>
+    <ErrorBoundary>
+      <AppProviders>
+        <BrowserRouter>
         <Routes>
           <Route element={<PublicLayout />}>
             <Route path="/login" element={<LoginPage />} />
+            <Route
+              path="/accept-invitation"
+              element={<AcceptInvitationPage />}
+            />
           </Route>
 
           <Route element={<ProtectedLayout />}>
@@ -111,6 +121,18 @@ function App() {
                 </RequireRole>
               }
             />
+            <Route
+              path="/audit"
+              element={
+                <RequireRole allowedRoles={["ADMIN"]}>
+                  <AuditPage />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/audit-logs"
+              element={<Navigate to="/audit" replace />}
+            />
             <Route path="/forbidden" element={<AccessDeniedPage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Route>
@@ -119,6 +141,7 @@ function App() {
         </Routes>
       </BrowserRouter>
     </AppProviders>
+    </ErrorBoundary>
   );
 }
 

@@ -124,7 +124,7 @@ describe("frontend architectural contracts", () => {
     expect(screen.getByText("Journal page")).toBeInTheDocument();
   });
 
-  it("shows account and journal management actions for accountants", async () => {
+  it("shows journal actions but hides account management for accountants", async () => {
     renderWithProviders(
       <MemoryRouter>
         <>
@@ -133,6 +133,25 @@ describe("frontend architectural contracts", () => {
         </>
       </MemoryRouter>,
       makeSession("ACCOUNTANT"),
+    );
+
+    expect(
+      screen.queryByRole("button", { name: /new account/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: /new draft/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows both account and journal management actions for admins", async () => {
+    renderWithProviders(
+      <MemoryRouter>
+        <>
+          <AccountsPage />
+          <JournalPage />
+        </>
+      </MemoryRouter>,
+      makeSession("ADMIN"),
     );
 
     expect(
@@ -187,4 +206,5 @@ describe("frontend architectural contracts", () => {
       Object.keys(apiService).sort(),
     );
   });
+
 });

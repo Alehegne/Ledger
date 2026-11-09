@@ -1,8 +1,10 @@
+/* eslint-disable react-refresh/only-export-components */
 import {
   createContext,
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import type { AuthSession } from "../types/domain";
@@ -11,6 +13,7 @@ const AUTH_STORAGE_KEY = "ledger.frontend.auth.session";
 
 interface AuthContextValue {
   session: AuthSession | null;
+  getSession: () => AuthSession | null;
   setSession: (session: AuthSession | null) => void;
   logout: () => void;
 }
@@ -33,8 +36,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [session, setSessionState] = useState<AuthSession | null>(() =>
     readStoredSession(),
   );
+  const sessionRef = useRef<AuthSession | null>(session);
 
   const setSession = useCallback((next: AuthSession | null) => {
+    sessionRef.current = next;
     setSessionState(next);
     if (next) {
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(next));
@@ -43,18 +48,26 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, []);
 
+  const getSession = useCallback(() => sessionRef.current, []);
+
   const logout = useCallback(() => setSession(null), [setSession]);
 
   const value = useMemo(
-    () => ({ session, setSession, logout }),
-    [session, setSession, logout],
+    () => ({ session, getSession, setSession, logout }),
+    [session, getSession, setSession, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
+const defaultAuthContext: AuthContextValue = {
+  session: null,
+  getSession: () => null,
+  setSession: () => {},
+  logout: () => {},
+};
+
 export const useAuth = () => {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("Auth context is unavailable");
-  return ctx;
+  return ctx ?? defaultAuthContext;
 };

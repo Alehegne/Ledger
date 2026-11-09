@@ -9,10 +9,11 @@ import { AuthProvider, useAuth } from "./auth-context";
 import { ToastProvider } from "./toast-provider";
 import { useToast } from "./toast-store";
 import { ServiceContext } from "../services/interfaces/service-context";
+import { createHttpClient } from "../services/api/http-client";
 import { createService } from "../services/create-service";
 
 const InnerProviders = ({ children }: { children: React.ReactNode }) => {
-  const auth = useAuth();
+  const { session, getSession, setSession, logout } = useAuth();
   const { showError } = useToast();
   const [client] = useState(
     () =>
@@ -26,14 +27,28 @@ const InnerProviders = ({ children }: { children: React.ReactNode }) => {
       }),
   );
 
+  const httpClient = useMemo(
+    () =>
+      createHttpClient({
+        getToken: () => getSession()?.token ?? null,
+        getRefreshToken: () => getSession()?.refreshToken ?? null,
+        onSessionRefreshed: setSession,
+        onUnauthorized: logout,
+      }),
+    [getSession, setSession, logout],
+  );
+
   const service = useMemo(
     () =>
       createService({
-        getToken: () => auth.session?.token ?? null,
-        onUnauthorized: auth.logout,
-        currentSession: auth.session,
+        getToken: () => getSession()?.token ?? null,
+        getRefreshToken: () => getSession()?.refreshToken ?? null,
+        onSessionRefreshed: setSession,
+        onUnauthorized: logout,
+        currentSession: session,
+        httpClient,
       }),
-    [auth.session, auth.logout],
+    [getSession, setSession, logout, session, httpClient],
   );
 
   return (

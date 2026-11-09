@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthProvider, useAuth } from "../../app/auth-context";
 import { ServiceContext } from "../../services/interfaces/service-context";
+import type { LedgerService } from "../../services/interfaces/ledger-service";
 import {
   createMockService,
   resetMockServiceState,
@@ -84,9 +85,9 @@ describe("reports page workflows", () => {
       },
     });
 
-    const badService = {
+    const badService: LedgerService = {
       ...createMockService(session),
-      listAccounts: vi.fn(async () => [
+      listAccounts: vi.fn<LedgerService["listAccounts"]>(async () => [
         {
           id: 1,
           organizationId: 42,
@@ -105,7 +106,7 @@ describe("reports page workflows", () => {
       getGeneralLedger: vi.fn(async () => {
         throw new Error("General ledger API is down");
       }),
-    } as any;
+    };
 
     const SessionSetter = () => {
       const { setSession } = useAuth();
@@ -129,5 +130,37 @@ describe("reports page workflows", () => {
 
     expect(await screen.findByText(/Reports unavailable/i)).toBeInTheDocument();
     expect(screen.getByText(/Trial balance API is down/i)).toBeInTheDocument();
+  });
+
+  it("applies dynamic date range presets and validates custom ranges before querying", async () => {
+    renderReportsPage();
+
+    expect(await screen.findAllByText("$5,650.00")).not.toHaveLength(0);
+
+    // Default Current Month (Nov 2026) has no Jan 2025 seeded entries
+    expect(
+      await screen.findByText(/No posted transactions for this account/i),
+    ).toBeInTheDocument();
+
+    // Switching to All Time exposes seeded general ledger transactions
+    fireEvent.click(screen.getByRole("button", { name: "All Time" }));
+
+    expect(
+      await screen.findByText("Monthly subscription revenue"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Jan 12, 2025")).toBeInTheDocument();
+
+    // Editing a date directly switches indicator to Custom Range and validates fromDate <= toDate
+    fireEvent.change(screen.getByLabelText("From date"), {
+      target: { value: "2026-12-31" },
+    });
+    fireEvent.change(screen.getByLabelText("To date"), {
+      target: { value: "2026-12-01" },
+    });
+
+    expect(screen.getByText("Custom Range")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Start date must be on or before end date/i),
+    ).toBeInTheDocument();
   });
 });

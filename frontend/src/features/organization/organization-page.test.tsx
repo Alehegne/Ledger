@@ -9,6 +9,7 @@ import { AuthProvider, useAuth } from "../../app/auth-context";
 import { AppShell } from "../../components/layout/app-shell";
 import { env } from "../../lib/env";
 import { ServiceContext } from "../../services/interfaces/service-context";
+import type { LedgerService } from "../../services/interfaces/ledger-service";
 import type { AuthSession } from "../../types/domain";
 import { OrganizationPage } from "./organization-page";
 
@@ -70,7 +71,7 @@ describe("organization settings page", () => {
       })),
       updateOrganizationSettings,
       listAuditLogs: vi.fn(),
-    } as any;
+    } as unknown as LedgerService;
 
     const queryClient = new QueryClient({
       defaultOptions: {
@@ -159,7 +160,7 @@ describe("organization settings page", () => {
       })),
       updateOrganizationSettings,
       listAuditLogs: vi.fn(),
-    } as any;
+    } as unknown as LedgerService;
 
     const queryClient = new QueryClient({
       defaultOptions: {
@@ -237,7 +238,7 @@ describe("organization settings page", () => {
       })),
       updateOrganizationSettings: vi.fn(),
       listAuditLogs: vi.fn(),
-    } as any;
+    } as unknown as LedgerService;
 
     const queryClient = new QueryClient({
       defaultOptions: {
@@ -312,7 +313,7 @@ describe("organization settings page", () => {
         throw new Error("Currency must be a 3-letter ISO code.");
       }),
       listAuditLogs: vi.fn(),
-    } as any;
+    } as unknown as LedgerService;
 
     const queryClient = new QueryClient({
       defaultOptions: {
@@ -389,7 +390,7 @@ describe("organization settings page", () => {
       })),
       updateOrganizationSettings: vi.fn(),
       listAuditLogs: vi.fn(),
-    } as any;
+    } as unknown as LedgerService;
 
     const queryClient = new QueryClient({
       defaultOptions: {
@@ -470,7 +471,7 @@ describe("organization settings page", () => {
       })),
       updateOrganizationSettings,
       listAuditLogs: vi.fn(),
-    } as any;
+    } as unknown as LedgerService;
 
     const queryClient = new QueryClient({
       defaultOptions: {

@@ -9,6 +9,7 @@ import { AuthProvider, useAuth } from "../../app/auth-context";
 import { env } from "../../lib/env";
 import { JournalPage } from "./journal-page";
 import { ServiceContext } from "../../services/interfaces/service-context";
+import type { LedgerService } from "../../services/interfaces/ledger-service";
 import {
   createMockService,
   resetMockServiceState,
@@ -151,7 +152,7 @@ describe("journal page workflows", () => {
         updateJournalDraft: vi.fn(),
         postJournalEntry: vi.fn(),
         deleteDraft: vi.fn(),
-      } as any;
+      } as unknown as LedgerService;
 
       renderJournalPage(service);
 
@@ -249,6 +250,39 @@ describe("journal page workflows", () => {
     ).not.toBeInTheDocument();
     expect(
       within(postedRow).queryByLabelText(/Delete UI posted entry/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("allows reversing a posted entry with a mandatory reason", async () => {
+    const user = userEvent.setup();
+    const service = createMockService(session);
+    renderJournalPage(service);
+
+    const reverseButtons = await screen.findAllByRole("button", {
+      name: "Reverse",
+    });
+    expect(reverseButtons.length).toBeGreaterThan(0);
+
+    await user.click(reverseButtons[0]);
+
+    expect(
+      screen.getByRole("heading", { name: "Reverse Journal Entry" }),
+    ).toBeInTheDocument();
+    const reasonInput = screen.getByPlaceholderText(/Invoice input error/i);
+    const confirmBtn = screen.getByRole("button", { name: "Confirm Reversal" });
+
+    expect(confirmBtn).toBeDisabled();
+
+    await user.type(reasonInput, "Billing correction");
+    expect(confirmBtn).not.toBeDisabled();
+
+    await user.click(confirmBtn);
+
+    expect(
+      await screen.findByText(/successfully reversed/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Reverse Journal Entry" }),
     ).not.toBeInTheDocument();
   });
 });

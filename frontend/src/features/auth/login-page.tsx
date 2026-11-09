@@ -2,9 +2,10 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowRight, LockKeyhole, Mail } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { z } from "zod";
 import { useAuth } from "../../app/auth-context";
+import { env } from "../../lib/env";
 import { useLedgerService } from "../../services/interfaces/service-context";
 
 const loginSchema = z.object({
@@ -26,10 +27,13 @@ export const LoginPage = () => {
     formState: { errors, isSubmitting },
   } = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
-    defaultValues: {
-      email: "alex@northstar.co",
-      password: "P@ssw0rd123",
-    },
+    defaultValues:
+      env.mode === "api"
+        ? { email: "", password: "" }
+        : {
+            email: "alex@northstar.co",
+            password: "P@ssw0rd123",
+          },
   });
 
   const onSubmit = async (values: LoginFormValues) => {
@@ -150,6 +154,16 @@ export const LoginPage = () => {
               {isSubmitting ? "Signing in..." : "Continue to Ledger"}
               <ArrowRight className="h-4 w-4" />
             </button>
+
+            <div className="mt-4 text-center text-xs text-slate-500">
+              Received an organization or team invitation?{" "}
+              <Link
+                to="/accept-invitation"
+                className="font-semibold text-slate-900 hover:underline"
+              >
+                Accept invitation
+              </Link>
+            </div>
           </form>
         </div>
       </div>

@@ -3,6 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Decimal from "decimal.js";
 import { Eye, Pencil, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "../../app/auth-context";
+import { useToast } from "../../app/toast-store";
+import { formatDateOnly, formatTimestamp, todayISO } from "../../lib/date";
+import { getErrorMessage } from "../../lib/errors";
 import { formatMoney } from "../../lib/money";
 import { useLedgerService } from "../../services/interfaces/service-context";
 import type { EntrySide, JournalEntry } from "../../types/domain";
@@ -34,7 +37,7 @@ const createDefaultLine = (): DraftLineState => ({
 });
 
 const defaultDraftFormState = (): DraftFormState => ({
-  transactionDate: new Date().toISOString().slice(0, 10),
+  transactionDate: todayISO(),
   description: "",
   reference: "",
   lines: [createDefaultLine(), { ...createDefaultLine(), side: "CREDIT" }],
@@ -49,15 +52,12 @@ const parseAmount = (value: string) => {
   }
 };
 
-const toErrorMessage = (error: unknown) =>
-  error instanceof Error
-    ? error.message
-    : "Something went wrong. Please try again.";
-
 export const JournalPage = () => {
   const service = useLedgerService();
   const queryClient = useQueryClient();
   const { session } = useAuth();
+  const { showSuccess } = useToast();
+  const currency = session?.user.baseCurrency ?? "USD";
   const canCreateJournal = session?.user.role !== "VIEWER";
   const [statusFilter, setStatusFilter] = useState<"ALL" | "DRAFT" | "POSTED">(
     "ALL",
@@ -72,6 +72,8 @@ export const JournalPage = () => {
   );
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
   const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
+  const [reversalModalEntry, setReversalModalEntry] = useState<JournalEntry | null>(null);
+  const [reversalReason, setReversalReason] = useState("");
 
   const journalQueryInput = useMemo(
     () => ({
@@ -142,6 +144,11 @@ export const JournalPage = () => {
 
   const postMutation = useMutation({
     mutationFn: (entryId: number) => service.postJournalEntry(entryId),
+  });
+
+  const reverseMutation = useMutation({
+    mutationFn: ({ entryId, reason }: { entryId: number; reason?: string }) =>
+      service.reverseJournalEntry(entryId, { reason }),
   });
 
   const activeAccounts = useMemo(
@@ -277,14 +284,14 @@ export const JournalPage = () => {
 
       await invalidateAccountingViews();
       setSelectedEntryId(result.id);
-      setFeedbackSuccess(
-        editingEntryId
-          ? "Draft updated successfully."
-          : "Draft created successfully.",
-      );
+      const message = editingEntryId
+        ? "Draft updated successfully."
+        : "Draft created successfully.";
+      setFeedbackSuccess(message);
+      showSuccess(message);
       closeForm();
     } catch (error) {
-      setFeedbackError(toErrorMessage(error));
+      setFeedbackError(getErrorMessage(error));
     }
   };
 
@@ -301,8 +308,9 @@ export const JournalPage = () => {
         setSelectedEntryId(null);
       }
       setFeedbackSuccess("Draft deleted.");
+      showSuccess("Draft deleted.");
     } catch (error) {
-      setFeedbackError(toErrorMessage(error));
+      setFeedbackError(getErrorMessage(error));
     }
   };
 
@@ -313,8 +321,36 @@ export const JournalPage = () => {
       await postMutation.mutateAsync(entryId);
       await invalidateAccountingViews();
       setFeedbackSuccess("Draft posted successfully.");
+      showSuccess("Draft posted successfully.");
     } catch (error) {
-      setFeedbackError(toErrorMessage(error));
+      setFeedbackError(getErrorMessage(error));
+    }
+  };
+
+  const handleOpenReverseModal = (entry: JournalEntry) => {
+    setFeedbackError(null);
+    setFeedbackSuccess(null);
+    setReversalModalEntry(entry);
+    setReversalReason("");
+  };
+
+  const handleConfirmReverse = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!reversalModalEntry) return;
+    setFeedbackError(null);
+    setFeedbackSuccess(null);
+    try {
+      const reversed = await reverseMutation.mutateAsync({
+        entryId: reversalModalEntry.id,
+        reason: reversalReason.trim() || undefined,
+      });
+      await invalidateAccountingViews();
+      const message = `Journal entry JE-${reversalModalEntry.id} successfully reversed with entry JE-${reversed.id}.`;
+      setFeedbackSuccess(message);
+      showSuccess(message);
+      setReversalModalEntry(null);
+    } catch (error) {
+      setFeedbackError(getErrorMessage(error));
     }
   };
 
@@ -322,7 +358,8 @@ export const JournalPage = () => {
     createDraftMutation.isPending ||
     updateDraftMutation.isPending ||
     deleteDraftMutation.isPending ||
-    postMutation.isPending;
+    postMutation.isPending ||
+    reverseMutation.isPending;
 
   if (isLoading || !data) {
     return (
@@ -503,15 +540,15 @@ export const JournalPage = () => {
               Add line
             </button>
             <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
-              Debit {formatMoney(totals.debit.toFixed(2))}
+              Debit {formatMoney(totals.debit.toFixed(2), currency)}
             </span>
             <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
-              Credit {formatMoney(totals.credit.toFixed(2))}
+              Credit {formatMoney(totals.credit.toFixed(2), currency)}
             </span>
             <span
               className={`rounded-full px-3 py-1 ${totals.difference.eq(0) ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}
             >
-              Difference {formatMoney(totals.difference.abs().toFixed(2))}
+              Difference {formatMoney(totals.difference.abs().toFixed(2), currency)}
             </span>
           </div>
 
@@ -559,27 +596,37 @@ export const JournalPage = () => {
                   {entry.description}
                 </td>
                 <td className="px-4 py-3 text-slate-600">
-                  {new Date(entry.transactionDate).toLocaleDateString()}
+                  {formatDateOnly(entry.transactionDate)}
                 </td>
                 <td className="px-4 py-3 text-slate-600">
                   {entry.reference ?? "—"}
                 </td>
                 <td className="px-4 py-3">
-                  <span
-                    className={`status-badge ${
-                      entry.status === "POSTED"
-                        ? "status-posted"
-                        : "status-draft"
-                    }`}
-                  >
-                    {entry.status}
-                  </span>
+                  {entry.status === "DRAFT" ? (
+                    <span className="status-badge status-draft">DRAFT</span>
+                  ) : entry.reversedByEntryId ? (
+                    <span
+                      className="status-badge bg-amber-100 text-amber-800"
+                      title={`Reversed by Entry #${entry.reversedByEntryId}`}
+                    >
+                      REVERSED
+                    </span>
+                  ) : entry.reversesEntryId ? (
+                    <span
+                      className="status-badge bg-indigo-100 text-indigo-800"
+                      title={`Reversal of Entry #${entry.reversesEntryId}`}
+                    >
+                      REVERSAL
+                    </span>
+                  ) : (
+                    <span className="status-badge status-posted">POSTED</span>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-right font-medium tabular-nums text-slate-900">
-                  {formatMoney(entry.totalDebits)}
+                  {formatMoney(entry.totalDebits, currency)}
                 </td>
                 <td className="px-4 py-3 text-right font-medium tabular-nums text-slate-900">
-                  {formatMoney(entry.totalCredits)}
+                  {formatMoney(entry.totalCredits, currency)}
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-2">
@@ -619,6 +666,19 @@ export const JournalPage = () => {
                           <Trash2 className="h-4 w-4" />
                         </button>
                       </>
+                    ) : null}
+                    {canCreateJournal &&
+                    entry.status === "POSTED" &&
+                    !entry.reversedByEntryId &&
+                    !entry.reversesEntryId ? (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenReverseModal(entry)}
+                        className="btn-secondary border-amber-300 px-2 py-1 text-xs text-amber-700 hover:bg-amber-50"
+                        disabled={isMutating}
+                      >
+                        Reverse
+                      </button>
                     ) : null}
                   </div>
                 </td>
@@ -674,7 +734,7 @@ export const JournalPage = () => {
                   <p className="text-slate-500">Posted at</p>
                   <p className="font-medium text-slate-800">
                     {selectedEntry.postedAt
-                      ? new Date(selectedEntry.postedAt).toLocaleString()
+                      ? formatTimestamp(selectedEntry.postedAt)
                       : "Not posted"}
                   </p>
                 </div>
@@ -684,6 +744,44 @@ export const JournalPage = () => {
                     {selectedEntry.reference ?? "—"}
                   </p>
                 </div>
+                {selectedEntry.reversedByEntryId ? (
+                  <div>
+                    <p className="text-slate-500">Reversed by</p>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSelectedEntryId(selectedEntry.reversedByEntryId!)
+                      }
+                      className="text-xs font-semibold text-amber-700 underline hover:text-amber-900"
+                    >
+                      Entry #{selectedEntry.reversedByEntryId}
+                    </button>
+                    {selectedEntry.reversalReason ? (
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {selectedEntry.reversalReason}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+                {selectedEntry.reversesEntryId ? (
+                  <div>
+                    <p className="text-slate-500">Reversal of</p>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSelectedEntryId(selectedEntry.reversesEntryId!)
+                      }
+                      className="text-xs font-semibold text-indigo-700 underline hover:text-indigo-900"
+                    >
+                      Entry #{selectedEntry.reversesEntryId}
+                    </button>
+                    {selectedEntry.reversalReason ? (
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {selectedEntry.reversalReason}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
 
               <div className="overflow-x-auto rounded-xl border border-slate-200">
@@ -707,7 +805,7 @@ export const JournalPage = () => {
                           {line.side}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums text-slate-900">
-                          {formatMoney(line.amount)}
+                          {formatMoney(line.amount, currency)}
                         </td>
                       </tr>
                     ))}
@@ -717,6 +815,57 @@ export const JournalPage = () => {
             </div>
           )}
         </section>
+      ) : null}
+
+      {reversalModalEntry ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-slate-900">
+              Reverse Journal Entry
+            </h3>
+            <p className="mt-2 text-sm text-slate-600">
+              You are about to reverse entry #{reversalModalEntry.id} (&ldquo;
+              {reversalModalEntry.description}&rdquo;). An offsetting entry with
+              inverted debits and credits will be automatically posted.
+            </p>
+            <form onSubmit={handleConfirmReverse} className="mt-4 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700">
+                  Reversal Reason (required)
+                </label>
+                <input
+                  type="text"
+                  required
+                  maxLength={500}
+                  value={reversalReason}
+                  onChange={(e) => setReversalReason(e.target.value)}
+                  placeholder="e.g. Invoice input error, duplicate entry"
+                  className="input-control mt-1 w-full"
+                  autoFocus
+                />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setReversalModalEntry(null)}
+                  className="btn-secondary"
+                  disabled={reverseMutation.isPending}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-danger"
+                  disabled={reverseMutation.isPending || !reversalReason.trim()}
+                >
+                  {reverseMutation.isPending
+                    ? "Reversing..."
+                    : "Confirm Reversal"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       ) : null}
     </div>
   );

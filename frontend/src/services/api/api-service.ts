@@ -10,16 +10,20 @@ import type {
   OrganizationUser,
   OverviewSnapshot,
   PageResult,
+  Role,
   TrialBalanceReport,
 } from "../../types/domain";
 import { UnsupportedInApiModeError } from "../../lib/errors";
-import type { LedgerService } from "../interfaces/ledger-service";
 import type {
-  ListJournalEntriesInput,
+  LedgerService,
   ListAuditInput,
+  ListJournalEntriesInput,
 } from "../interfaces/ledger-service";
 
-type ApiHttp = (path: string, init?: RequestInit) => Promise<unknown> | unknown;
+export type ApiHttp = (
+  path: string,
+  init?: RequestInit,
+) => Promise<unknown> | unknown;
 
 type ApiPage<T> = {
   page: number;
@@ -284,12 +288,8 @@ const mapInvitation = (value: unknown): Invitation => {
     throw new Error("Invalid invitation response: missing or invalid role.");
   }
 
-  if (
-    typeof value.invitationToken !== "string" ||
-    value.invitationToken.trim().length === 0
-  ) {
-    throw new Error("Invalid invitation response: missing invitationToken.");
-  }
+  const invitationToken =
+    typeof value.invitationToken === "string" ? value.invitationToken : "";
 
   if (
     typeof value.expiresAt !== "string" ||
@@ -310,7 +310,7 @@ const mapInvitation = (value: unknown): Invitation => {
     organizationId: value.organizationId,
     invitedEmail: value.invitedEmail,
     role: value.role as Invitation["role"],
-    invitationToken: value.invitationToken,
+    invitationToken,
     expiresAt: value.expiresAt,
     createdAt: value.createdAt,
   };
@@ -708,13 +708,25 @@ const mapJournalEntry = (value: unknown): JournalEntry => {
     lines: value.lines.map(mapJournalLine),
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
+    reversedByEntryId:
+      typeof value.reversedByEntryId === "number" &&
+      Number.isFinite(value.reversedByEntryId)
+        ? value.reversedByEntryId
+        : null,
+    reversesEntryId:
+      typeof value.reversesEntryId === "number" &&
+      Number.isFinite(value.reversesEntryId)
+        ? value.reversesEntryId
+        : null,
+    reversalReason:
+      typeof value.reversalReason === "string" ? value.reversalReason : null,
   };
 };
 
 const buildQuery = (params: Record<string, string | number | undefined>) => {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
-    if (value === undefined) continue;
+    if (value === undefined || value === "") continue;
     query.set(key, String(value));
   }
   const asString = query.toString();
@@ -867,13 +879,23 @@ const mapAccountBalance = (value: unknown): AccountBalance => {
   };
 };
 
-const mapLoginResponse = (value: unknown): AuthSession => {
+export const mapLoginResponse = (value: unknown): AuthSession => {
   if (!isPlainObject(value)) {
     throw new Error("Invalid login response: expected an object.");
   }
 
   const token = value.token;
   const expiresAt = value.expiresAt;
+  const refreshToken =
+    typeof value.refreshToken === "string" &&
+    value.refreshToken.trim().length > 0
+      ? value.refreshToken
+      : undefined;
+  const refreshExpiresAt =
+    typeof value.refreshExpiresAt === "string" &&
+    value.refreshExpiresAt.trim().length > 0
+      ? value.refreshExpiresAt
+      : undefined;
   const user = value.user;
 
   if (typeof token !== "string" || token.trim().length === 0) {
@@ -897,6 +919,11 @@ const mapLoginResponse = (value: unknown): AuthSession => {
     typeof user.organizationName === "string" &&
     user.organizationName.trim().length > 0
       ? user.organizationName.trim()
+      : undefined;
+  const baseCurrency =
+    typeof user.baseCurrency === "string" &&
+    user.baseCurrency.trim().length > 0
+      ? user.baseCurrency.trim()
       : undefined;
 
   if (typeof id !== "number" || !Number.isFinite(id)) {
@@ -926,6 +953,8 @@ const mapLoginResponse = (value: unknown): AuthSession => {
   return {
     token,
     expiresAt,
+    ...(refreshToken ? { refreshToken } : {}),
+    ...(refreshExpiresAt ? { refreshExpiresAt } : {}),
     user: {
       id,
       email,
@@ -933,6 +962,7 @@ const mapLoginResponse = (value: unknown): AuthSession => {
       role: role as AuthSession["user"]["role"],
       organizationId,
       ...(organizationName ? { organizationName } : {}),
+      ...(baseCurrency ? { baseCurrency } : {}),
     },
   };
 };
@@ -952,6 +982,22 @@ export const createApiService = (
       });
 
       return mapLoginResponse(payload);
+    },
+
+    async refreshSession(refreshToken): Promise<AuthSession> {
+      const payload = await request<unknown>("/auth/refresh", {
+        method: "POST",
+        body: JSON.stringify({ refreshToken }),
+      });
+
+      return mapLoginResponse(payload);
+    },
+
+    async logout(refreshToken): Promise<void> {
+      await request<void>("/auth/logout", {
+        method: "POST",
+        body: refreshToken ? JSON.stringify({ refreshToken }) : undefined,
+      });
     },
 
     async getOverview(): Promise<OverviewSnapshot> {
@@ -1016,27 +1062,54 @@ export const createApiService = (
       return mapAccountBalance(response);
     },
 
-    async createAccount(): Promise<Account> {
-      throw new UnsupportedInApiModeError(
-        "Account creation is not supported by the backend contract.",
-      );
+    async createAccount(payload): Promise<Account> {
+      const response = await request<unknown>("/accounts", {
+        method: "POST",
+        body: JSON.stringify({
+          accountCode: payload.accountCode,
+          name: payload.name,
+          accountType: payload.accountType,
+          status: payload.status,
+          parentAccountId: payload.parentAccountId ?? null,
+        }),
+      });
+      return mapAccount(response);
     },
 
-    async updateAccount(): Promise<Account> {
-      throw new UnsupportedInApiModeError(
-        "Account update is not supported by the backend contract.",
-      );
+    async updateAccount(accountId, payload): Promise<Account> {
+      const response = await request<unknown>(`/accounts/${accountId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          ...(payload.accountCode !== undefined && {
+            accountCode: payload.accountCode,
+          }),
+          ...(payload.name !== undefined && { name: payload.name }),
+          ...(payload.accountType !== undefined && {
+            accountType: payload.accountType,
+          }),
+          ...(payload.status !== undefined && { status: payload.status }),
+          ...(payload.parentAccountId !== undefined && {
+            parentAccountId: payload.parentAccountId ?? null,
+          }),
+        }),
+      });
+      return mapAccount(response);
     },
 
-    async deactivateAccount(): Promise<Account> {
-      throw new UnsupportedInApiModeError(
-        "Account deactivation is not supported by the backend contract.",
+    async deactivateAccount(accountId): Promise<Account> {
+      const response = await request<unknown>(
+        `/accounts/${accountId}/deactivate`,
+        {
+          method: "POST",
+        },
       );
+      return mapAccount(response);
     },
 
-    async deleteAccount(): Promise<void> {
+    async deleteAccount(accountId): Promise<void> {
+      void accountId;
       throw new UnsupportedInApiModeError(
-        "Account deletion is not supported by the backend contract.",
+        "Account deletion is not supported; accounts can only be deactivated.",
       );
     },
 
@@ -1115,11 +1188,17 @@ export const createApiService = (
       return mapJournalEntry(response);
     },
 
-    async reverseJournalEntry(entryId): Promise<JournalEntry> {
+    async reverseJournalEntry(entryId, payload): Promise<JournalEntry> {
       const response = await request<unknown>(
         `/journal-entries/${entryId}/reverse`,
         {
           method: "POST",
+          headers: payload?.reason
+            ? { "Content-Type": "application/json" }
+            : undefined,
+          body: payload?.reason
+            ? JSON.stringify({ reason: payload.reason })
+            : undefined,
         },
       );
       return mapJournalEntry(response);
@@ -1163,6 +1242,34 @@ export const createApiService = (
       return mapInvitation(response);
     },
 
+    async listPendingInvitations(): Promise<Invitation[]> {
+      const response = await request<unknown>("/invitations");
+      if (!Array.isArray(response)) {
+        throw new Error(
+          "Invalid invitation list response: expected an array.",
+        );
+      }
+      return response.map(mapInvitation);
+    },
+
+    async revokeInvitation(invitationId: number): Promise<void> {
+      await request<unknown>(`/invitations/${invitationId}`, {
+        method: "DELETE",
+      });
+    },
+
+    async acceptInvitation(payload): Promise<{ message: string }> {
+      const response = await request<unknown>("/invitations/accept", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (isPlainObject(response) && typeof response.message === "string") {
+        return { message: response.message };
+      }
+      return { message: "Invitation accepted successfully." };
+    },
+
     async listOrganizationUsers(): Promise<OrganizationUser[]> {
       const response = await request<unknown>("/users");
       if (!Array.isArray(response)) {
@@ -1171,6 +1278,18 @@ export const createApiService = (
         );
       }
       return response.map(mapOrganizationUser);
+    },
+
+    async updateUserRole(
+      userId: number,
+      role: Role,
+    ): Promise<OrganizationUser> {
+      const response = await request<unknown>(`/users/${userId}/role`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role }),
+      });
+      return mapOrganizationUser(response);
     },
 
     async getOrganizationSettings(): Promise<OrganizationSettings> {
@@ -1203,10 +1322,52 @@ export const createApiService = (
     async listAuditLogs(
       input: ListAuditInput,
     ): Promise<PageResult<AuditLogItem>> {
-      void input;
-      throw new UnsupportedInApiModeError(
-        "Audit log retrieval remains disabled pending a product decision on non-admin audit visibility.",
-      );
+      const page = (input.page ?? 1) - 1;
+      const size = input.size ?? 20;
+
+      const path = `/api/audit-logs${buildQuery({
+        actor: input.actor,
+        action: input.action,
+        entity: input.entity,
+        fromDate: input.fromDate,
+        toDate: input.toDate,
+        page,
+        size,
+      })}`;
+
+      const response = await request<unknown>(path);
+      if (!isPlainObject(response)) {
+        throw new Error("Invalid audit logs response: expected an object.");
+      }
+
+      const rawItems = Array.isArray(response.items) ? response.items : [];
+      const items: AuditLogItem[] = rawItems.map((raw) => {
+        if (!isPlainObject(raw)) {
+          throw new Error("Invalid audit log item: expected an object.");
+        }
+        return {
+          id: typeof raw.id === "number" ? raw.id : Number(raw.id),
+          actor: typeof raw.actor === "string" ? raw.actor : "System",
+          action: typeof raw.action === "string" ? raw.action : "",
+          entityType: typeof raw.entityType === "string" ? raw.entityType : "",
+          entityId: typeof raw.entityId === "string" ? raw.entityId : "",
+          createdAt: typeof raw.createdAt === "string" ? raw.createdAt : "",
+          metadata: typeof raw.metadata === "string" ? raw.metadata : "{}",
+        };
+      });
+
+      return {
+        page: typeof response.page === "number" ? response.page + 1 : 1,
+        size: typeof response.size === "number" ? response.size : size,
+        totalElements:
+          typeof response.totalElements === "number"
+            ? response.totalElements
+            : items.length,
+        totalPages:
+          typeof response.totalPages === "number" ? response.totalPages : 1,
+        items,
+      };
     },
-  } as LedgerService;
+
+  };
 };

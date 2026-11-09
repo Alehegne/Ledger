@@ -16,11 +16,14 @@ export interface AuthUser {
   role: Role;
   organizationId: number;
   organizationName?: string;
+  baseCurrency?: string;
 }
 
 export interface AuthSession {
   token: string;
   expiresAt: string;
+  refreshToken?: string;
+  refreshExpiresAt?: string;
   user: AuthUser;
 }
 
@@ -75,6 +78,9 @@ export interface JournalEntry {
   lines: JournalLine[];
   createdAt: string;
   updatedAt: string;
+  reversedByEntryId?: number | null;
+  reversesEntryId?: number | null;
+  reversalReason?: string | null;
 }
 
 export interface PageResult<T> {
@@ -171,3 +177,4 @@ export interface OrganizationUser {
   role: Role;
   invitationStatus: "ACTIVE" | "PENDING" | "UNKNOWN";
 }
+

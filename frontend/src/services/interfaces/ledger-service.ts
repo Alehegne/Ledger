@@ -1,18 +1,18 @@
 import type {
   Account,
   AccountBalance,
+  AuditLogItem,
   AuthSession,
   GeneralLedgerReport,
   Invitation,
   JournalEntry,
+  JournalEntryStatus,
   OrganizationSettings,
   OrganizationUser,
-  PageResult,
-  TrialBalanceReport,
-  AuditLogItem,
   OverviewSnapshot,
+  PageResult,
   Role,
-  JournalEntryStatus,
+  TrialBalanceReport,
 } from "../../types/domain";
 
 export interface ListJournalEntriesInput {
@@ -49,6 +49,8 @@ export interface ListAuditInput {
 
 export interface LedgerService {
   login(email: string, password: string): Promise<AuthSession>;
+  refreshSession(refreshToken: string): Promise<AuthSession>;
+  logout(refreshToken?: string): Promise<void>;
 
   getOverview(): Promise<OverviewSnapshot>;
 
@@ -85,7 +87,10 @@ export interface LedgerService {
     payload: SaveJournalInput,
   ): Promise<JournalEntry>;
   postJournalEntry(entryId: number): Promise<JournalEntry>;
-  reverseJournalEntry(entryId: number): Promise<JournalEntry>;
+  reverseJournalEntry(
+    entryId: number,
+    payload?: { reason?: string },
+  ): Promise<JournalEntry>;
   deleteDraft(entryId: number): Promise<void>;
 
   getGeneralLedger(input: {
@@ -99,7 +104,16 @@ export interface LedgerService {
   getTrialBalance(asOfDate?: string): Promise<TrialBalanceReport>;
 
   createInvitation(payload: { email: string; role: Role }): Promise<Invitation>;
+  listPendingInvitations(): Promise<Invitation[]>;
+  revokeInvitation(invitationId: number): Promise<void>;
+  acceptInvitation(payload: {
+    token: string;
+    email: string;
+    fullName: string;
+    password: string;
+  }): Promise<{ message: string }>;
   listOrganizationUsers(): Promise<OrganizationUser[]>;
+  updateUserRole(userId: number, role: Role): Promise<OrganizationUser>;
   getOrganizationSettings(): Promise<OrganizationSettings>;
   updateOrganizationSettings(
     payload: Partial<{

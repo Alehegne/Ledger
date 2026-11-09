@@ -5,6 +5,8 @@ import {
   PiggyBank,
   TrendingUp,
 } from "lucide-react";
+import { useAuth } from "../../app/auth-context";
+import { formatDateOnly } from "../../lib/date";
 import { UnsupportedInApiModeError } from "../../lib/errors";
 import { formatMoney } from "../../lib/money";
 import { useLedgerService } from "../../services/interfaces/service-context";
@@ -24,6 +26,8 @@ const toUnavailableMessage = (error: unknown, fallback: string) => {
 
 export const DashboardPage = () => {
   const service = useLedgerService();
+  const { session } = useAuth();
+  const currency = session?.user.baseCurrency ?? "USD";
 
   const {
     data: overview,
@@ -69,17 +73,17 @@ export const DashboardPage = () => {
   const cards = [
     {
       label: "Total assets",
-      value: formatMoney(overview.totalAssets),
+      value: formatMoney(overview.totalAssets, currency),
       icon: PiggyBank,
     },
     {
       label: "Revenue",
-      value: formatMoney(overview.totalRevenue),
+      value: formatMoney(overview.totalRevenue, currency),
       icon: TrendingUp,
     },
     {
       label: "Expenses",
-      value: formatMoney(overview.totalExpenses),
+      value: formatMoney(overview.totalExpenses, currency),
       icon: CircleDollarSign,
     },
     {
@@ -98,7 +102,7 @@ export const DashboardPage = () => {
         </h2>
         <p className="mt-1 text-sm text-slate-600">
           Metrics are based on posted accounting activity as of{" "}
-          {new Date(overview.asOfDate).toLocaleDateString()}.
+          {formatDateOnly(overview.asOfDate)}.
         </p>
       </section>
 
@@ -153,7 +157,7 @@ export const DashboardPage = () => {
                       {entry.description}
                     </td>
                     <td className="py-3 pr-4 text-slate-600">
-                      {new Date(entry.transactionDate).toLocaleDateString()}
+                      {formatDateOnly(entry.transactionDate)}
                     </td>
                     <td className="py-3 pr-4 text-slate-600">
                       {entry.reference ?? "—"}

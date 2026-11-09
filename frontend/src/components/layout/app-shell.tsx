@@ -1,16 +1,18 @@
-import type { ReactNode } from "react";
+import { useContext, type ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   BarChart3,
   BookOpenText,
   Building2,
   CreditCard,
+  History,
   LogOut,
   ShieldCheck,
   Users,
 } from "lucide-react";
 import { useAuth } from "../../app/auth-context";
 import { env } from "../../lib/env";
+import { ServiceContext } from "../../services/interfaces/service-context";
 import type { Role } from "../../types/domain";
 
 const navItems: Array<{
@@ -44,11 +46,13 @@ const navItems: Array<{
     roles: ["ADMIN", "ACCOUNTANT", "VIEWER"],
   },
   { to: "/users", label: "Users", icon: Users, roles: ["ADMIN"] },
+  { to: "/audit", label: "Audit Logs", icon: History, roles: ["ADMIN"] },
   { to: "/settings", label: "Settings", icon: ShieldCheck, roles: ["ADMIN"] },
 ];
 
 export const AppShell = ({ children }: { children: ReactNode }) => {
   const { session, logout } = useAuth();
+  const service = useContext(ServiceContext);
   const navigate = useNavigate();
   const userRole = session?.user.role ?? "VIEWER";
   const organizationName = session?.user.organizationName ?? "Northstar Co.";
@@ -57,9 +61,18 @@ export const AppShell = ({ children }: { children: ReactNode }) => {
     roles.includes(userRole),
   );
 
-  const handleLogout = () => {
-    logout();
-    navigate("/login", { replace: true });
+  const handleLogout = async () => {
+    const refreshToken = session?.refreshToken;
+    try {
+      if (service) {
+        await service.logout(refreshToken);
+      }
+    } catch {
+      // Proceed with local sign-out even if server revocation fails
+    } finally {
+      logout();
+      navigate("/login", { replace: true });
+    }
   };
 
   return (
