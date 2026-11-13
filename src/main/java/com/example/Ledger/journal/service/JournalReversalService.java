@@ -6,18 +6,25 @@ import com.example.Ledger.common.enums.EntrySide;
 import com.example.Ledger.common.enums.JournalEntryStatus;
 import com.example.Ledger.common.exception.BusinessException;
 import com.example.Ledger.common.exception.ResourceNotFoundException;
+import com.example.Ledger.common.observability.LedgerMetricsService;
 import com.example.Ledger.common.security.CurrentUserProvider;
+import io.micrometer.core.instrument.Timer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.example.Ledger.journal.dto.JournalEntryResponse;
 import com.example.Ledger.journal.model.JournalEntry;
 import com.example.Ledger.journal.model.JournalLine;
 import com.example.Ledger.journal.repository.JournalEntryRepository;
+import com.example.Ledger.outbox.service.OutboxEventService;
 import com.example.Ledger.user.model.LedgerUser;
 import com.example.Ledger.user.repository.LedgerUserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -28,9 +35,13 @@ import java.util.Map;
 @Transactional
 public class JournalReversalService {
 
+    private static final Logger log = LoggerFactory.getLogger(JournalReversalService.class);
+
     private final JournalEntryRepository journalEntryRepository;
     private final JournalEntryService journalEntryService;
     private final AuditLogService auditLogService;
+    private final OutboxEventService outboxEventService;
+    private final LedgerMetricsService ledgerMetricsService;
     private final LedgerUserRepository userRepository;
     private final CurrentUserProvider currentUserProvider;
 
@@ -38,12 +49,16 @@ public class JournalReversalService {
             JournalEntryRepository journalEntryRepository,
             JournalEntryService journalEntryService,
             AuditLogService auditLogService,
+            OutboxEventService outboxEventService,
+            LedgerMetricsService ledgerMetricsService,
             LedgerUserRepository userRepository,
             CurrentUserProvider currentUserProvider
     ) {
         this.journalEntryRepository = journalEntryRepository;
         this.journalEntryService = journalEntryService;
         this.auditLogService = auditLogService;
+        this.outboxEventService = outboxEventService;
+        this.ledgerMetricsService = ledgerMetricsService;
         this.userRepository = userRepository;
         this.currentUserProvider = currentUserProvider;
     }
@@ -61,10 +76,12 @@ public class JournalReversalService {
     }
 
     public JournalEntryResponse reverseEntry(Long originalEntryId, String reason) {
-        currentUserProvider.requireRole(
-                com.example.Ledger.common.enums.Role.ADMIN,
-                com.example.Ledger.common.enums.Role.ACCOUNTANT
-        );
+        Timer.Sample sample = ledgerMetricsService.startTransactionTimer();
+        try {
+            currentUserProvider.requireRole(
+                    com.example.Ledger.common.enums.Role.ADMIN,
+                    com.example.Ledger.common.enums.Role.ACCOUNTANT
+            );
 
         Long organizationId = currentUserProvider.getCurrentOrganizationId();
 
@@ -117,7 +134,64 @@ public class JournalReversalService {
                 )
         );
 
+        BigDecimal totalDebits = savedReversal.getLines().stream()
+                .filter(line -> line.getSide() == EntrySide.DEBIT)
+                .map(JournalLine::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal totalCredits = savedReversal.getLines().stream()
+                .filter(line -> line.getSide() == EntrySide.CREDIT)
+                .map(JournalLine::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        Map<String, Object> reversedPayload = new LinkedHashMap<>();
+        reversedPayload.put("originalEntryId", originalEntry.getId());
+        reversedPayload.put("reversalEntryId", savedReversal.getId());
+        reversedPayload.put("organizationId", originalEntry.getOrganization().getId());
+        reversedPayload.put("reason", cleanReason);
+        reversedPayload.put("transactionDate", originalEntry.getTransactionDate().toString());
+        reversedPayload.put("totalDebits", totalDebits);
+        reversedPayload.put("totalCredits", totalCredits);
+        reversedPayload.put("reversedAt", savedReversal.getPostedAt().toString());
+
+        outboxEventService.recordEvent(
+                originalEntry.getOrganization(),
+                "JOURNAL_REVERSED",
+                "JOURNAL_ENTRY",
+                originalEntry.getId().toString(),
+                reversedPayload
+        );
+
+        Map<String, Object> reversalPostedPayload = new LinkedHashMap<>();
+        reversalPostedPayload.put("entryId", savedReversal.getId());
+        reversalPostedPayload.put("organizationId", savedReversal.getOrganization().getId());
+        reversalPostedPayload.put("transactionDate", savedReversal.getTransactionDate().toString());
+        reversalPostedPayload.put("reference", savedReversal.getReference());
+        reversalPostedPayload.put("description", savedReversal.getDescription());
+        reversalPostedPayload.put("totalDebits", totalDebits);
+        reversalPostedPayload.put("totalCredits", totalCredits);
+        reversalPostedPayload.put("postedByUserId", savedReversal.getPostedByUser() == null ? null : savedReversal.getPostedByUser().getId());
+        reversalPostedPayload.put("postedAt", savedReversal.getPostedAt().toString());
+        reversalPostedPayload.put("lineCount", savedReversal.getLines().size());
+        reversalPostedPayload.put("isReversal", true);
+        reversalPostedPayload.put("reversesEntryId", originalEntry.getId());
+
+        outboxEventService.recordEvent(
+                savedReversal.getOrganization(),
+                "JOURNAL_POSTED",
+                "JOURNAL_ENTRY",
+                savedReversal.getId().toString(),
+                reversalPostedPayload
+        );
+
+        ledgerMetricsService.recordJournalReversedAfterCommit();
+        ledgerMetricsService.recordJournalPostedAfterCommit();
+        log.info("Reversed journal entry id={} with reversalEntryId={} totalDebits={}",
+                originalEntry.getId(), savedReversal.getId(), totalDebits);
+
         return journalEntryService.mapEntry(savedReversal);
+        } finally {
+            ledgerMetricsService.stopTransactionTimer(sample);
+        }
     }
 
     /**

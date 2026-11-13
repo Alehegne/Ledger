@@ -849,6 +849,10 @@ class Day4ReportAndReversalTests extends PostgresIntegrationTestSupport {
                 .uri(URI.create("http://localhost:" + port + path))
                 .header("Authorization", "Bearer " + token);
 
+        if (path.endsWith("/post") || path.endsWith("/reverse")) {
+            builder.header("Idempotency-Key", UUID.randomUUID().toString());
+        }
+
         if (payload == null) {
             builder.POST(HttpRequest.BodyPublishers.noBody());
         } else {

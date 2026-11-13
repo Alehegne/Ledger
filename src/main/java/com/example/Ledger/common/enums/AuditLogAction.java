@@ -25,7 +25,13 @@ public enum AuditLogAction {
     JOURNAL_UPDATED,
     JOURNAL_DELETED,
     JOURNAL_POSTED,
-    JOURNAL_REVERSED;
+    JOURNAL_REVERSED,
+
+    // Financial reconciliation events
+    RECONCILIATION_RUN,
+
+    // Transactional outbox events
+    OUTBOX_EVENT_RETRY_REQUESTED;
 
     @Override
     public String toString() {

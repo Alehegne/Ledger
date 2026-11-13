@@ -239,9 +239,13 @@ class JournalConcurrencyIntegrationTest extends PostgresIntegrationTestSupport {
     }
 
     private HttpResponse<String> postEmptyWithToken(String path, String token) throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder()
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create("http://localhost:" + port + path))
-                .header("Authorization", "Bearer " + token)
+                .header("Authorization", "Bearer " + token);
+        if (path.endsWith("/post") || path.endsWith("/reverse")) {
+            builder.header("Idempotency-Key", UUID.randomUUID().toString());
+        }
+        HttpRequest request = builder
                 .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
         return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());

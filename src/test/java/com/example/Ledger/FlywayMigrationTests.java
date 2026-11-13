@@ -44,7 +44,10 @@ class FlywayMigrationTests extends PostgresIntegrationTestSupport {
                 "journal_line",
                 "audit_log",
                 "invitation",
-                "refresh_token"
+                "refresh_token",
+                "idempotency_key",
+                "reconciliation_run",
+                "outbox_event"
         );
 
         expectedTables.forEach(table -> {
@@ -69,7 +72,10 @@ class FlywayMigrationTests extends PostgresIntegrationTestSupport {
                 "journal_line",
                 "audit_log",
                 "invitation",
-                "refresh_token"
+                "refresh_token",
+                "idempotency_key",
+                "reconciliation_run",
+                "outbox_event"
         );
 
         expectedTables.forEach(table -> {
@@ -121,5 +127,83 @@ class FlywayMigrationTests extends PostgresIntegrationTestSupport {
                 Integer.class
         );
         assertThat(userStatusColumn).isEqualTo(1);
+    }
+
+    @Test
+    void migrationV11AndIdempotencySchemaExist() {
+        Integer appliedV11 = jdbcTemplate.queryForObject(
+                "select count(*) from flyway_schema_history where version = '11' and success = true",
+                Integer.class
+        );
+        assertThat(appliedV11).isEqualTo(1);
+
+        Integer uniqueConstraint = jdbcTemplate.queryForObject(
+                """
+                select count(*) from information_schema.table_constraints
+                where table_schema = 'public'
+                  and table_name = 'idempotency_key'
+                  and constraint_name = 'uq_idempotency_org_key'
+                """,
+                Integer.class
+        );
+        assertThat(uniqueConstraint).isEqualTo(1);
+    }
+
+    @Test
+    void migrationV12AndReconciliationSchemaExist() {
+        Integer appliedV12 = jdbcTemplate.queryForObject(
+                "select count(*) from flyway_schema_history where version = '12' and success = true",
+                Integer.class
+        );
+        assertThat(appliedV12).isEqualTo(1);
+
+        Integer statusCheckConstraint = jdbcTemplate.queryForObject(
+                """
+                select count(*) from information_schema.table_constraints
+                where table_schema = 'public'
+                  and table_name = 'reconciliation_run'
+                  and constraint_name = 'chk_reconciliation_status'
+                """,
+                Integer.class
+        );
+        assertThat(statusCheckConstraint).isEqualTo(1);
+
+        Integer historyIndex = jdbcTemplate.queryForObject(
+                "select count(*) from pg_indexes where schemaname = 'public' and tablename = 'reconciliation_run' and indexname = 'idx_reconciliation_org_created'",
+                Integer.class
+        );
+        assertThat(historyIndex).isEqualTo(1);
+    }
+
+    @Test
+    void migrationV13AndOutboxSchemaExist() {
+        Integer appliedV13 = jdbcTemplate.queryForObject(
+                "select count(*) from flyway_schema_history where version = '13' and success = true",
+                Integer.class
+        );
+        assertThat(appliedV13).isEqualTo(1);
+
+        Integer statusCheckConstraint = jdbcTemplate.queryForObject(
+                """
+                select count(*) from information_schema.table_constraints
+                where table_schema = 'public'
+                  and table_name = 'outbox_event'
+                  and constraint_name = 'chk_outbox_status'
+                """,
+                Integer.class
+        );
+        assertThat(statusCheckConstraint).isEqualTo(1);
+
+        Integer pendingPollIndex = jdbcTemplate.queryForObject(
+                "select count(*) from pg_indexes where schemaname = 'public' and tablename = 'outbox_event' and indexname = 'idx_outbox_pending_poll'",
+                Integer.class
+        );
+        assertThat(pendingPollIndex).isEqualTo(1);
+
+        Integer orgCreatedIndex = jdbcTemplate.queryForObject(
+                "select count(*) from pg_indexes where schemaname = 'public' and tablename = 'outbox_event' and indexname = 'idx_outbox_org_created'",
+                Integer.class
+        );
+        assertThat(orgCreatedIndex).isEqualTo(1);
     }
 }

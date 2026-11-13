@@ -86,7 +86,11 @@ public class GlobalExceptionHandler {
             HttpServletRequest request
     ) {
         HttpStatus status = switch (ex.getCode()) {
-            case "DUPLICATE_ACCOUNT_CODE", "ORGANIZATION_NAME_EXISTS", "BASE_CURRENCY_LOCKED", "CONCURRENT_MODIFICATION", "LAST_ADMIN_PROTECTION", "NO_ACTIVE_ADMIN" ->
+            case "MISSING_IDEMPOTENCY_KEY", "INVALID_IDEMPOTENCY_KEY" ->
+                    HttpStatus.BAD_REQUEST;
+            case "DUPLICATE_ACCOUNT_CODE", "ORGANIZATION_NAME_EXISTS", "BASE_CURRENCY_LOCKED",
+                 "CONCURRENT_MODIFICATION", "LAST_ADMIN_PROTECTION", "NO_ACTIVE_ADMIN",
+                 "IDEMPOTENCY_KEY_IN_PROGRESS" ->
                     HttpStatus.CONFLICT;
             default -> HttpStatus.UNPROCESSABLE_CONTENT;
         };

@@ -13,6 +13,7 @@ import com.example.Ledger.journal.repository.JournalLineRepository.PostedAccount
 import com.example.Ledger.journal.service.JournalEntryService;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -20,7 +21,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 @Service
-@Transactional(readOnly = true)
+@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
 public class DashboardOverviewService {
 
     private static final int RECENT_ENTRIES_LIMIT = 5;

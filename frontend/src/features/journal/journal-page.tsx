@@ -1,11 +1,11 @@
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Decimal from "decimal.js";
 import { Eye, Pencil, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "../../app/auth-context";
 import { useToast } from "../../app/toast-store";
 import { formatDateOnly, formatTimestamp, todayISO } from "../../lib/date";
-import { getErrorMessage } from "../../lib/errors";
+import { AppError, getErrorMessage } from "../../lib/errors";
 import { formatMoney } from "../../lib/money";
 import { useLedgerService } from "../../services/interfaces/service-context";
 import type { EntrySide, JournalEntry } from "../../types/domain";
@@ -74,6 +74,12 @@ export const JournalPage = () => {
   const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
   const [reversalModalEntry, setReversalModalEntry] = useState<JournalEntry | null>(null);
   const [reversalReason, setReversalReason] = useState("");
+  const postAttemptKeysRef = useRef<Map<number, string>>(new Map());
+  const reverseAttemptRef = useRef<{
+    entryId: number;
+    reason: string;
+    key: string;
+  } | null>(null);
 
   const journalQueryInput = useMemo(
     () => ({
@@ -143,12 +149,25 @@ export const JournalPage = () => {
   });
 
   const postMutation = useMutation({
-    mutationFn: (entryId: number) => service.postJournalEntry(entryId),
+    mutationFn: ({
+      entryId,
+      idempotencyKey,
+    }: {
+      entryId: number;
+      idempotencyKey: string;
+    }) => service.postJournalEntry(entryId, { idempotencyKey }),
   });
 
   const reverseMutation = useMutation({
-    mutationFn: ({ entryId, reason }: { entryId: number; reason?: string }) =>
-      service.reverseJournalEntry(entryId, { reason }),
+    mutationFn: ({
+      entryId,
+      reason,
+      idempotencyKey,
+    }: {
+      entryId: number;
+      reason?: string;
+      idempotencyKey: string;
+    }) => service.reverseJournalEntry(entryId, { reason, idempotencyKey }),
   });
 
   const activeAccounts = useMemo(
@@ -314,15 +333,30 @@ export const JournalPage = () => {
     }
   };
 
+  const isRetriableIdempotencyError = (error: unknown): boolean => {
+    if (!(error instanceof AppError)) {
+      return true;
+    }
+    return error.status >= 500 || error.code === "IDEMPOTENCY_KEY_IN_PROGRESS";
+  };
+
   const handlePostDraft = async (entryId: number) => {
     setFeedbackError(null);
     setFeedbackSuccess(null);
+    const existingKey = postAttemptKeysRef.current.get(entryId);
+    const idempotencyKey = existingKey ?? nextRowId();
+    postAttemptKeysRef.current.set(entryId, idempotencyKey);
+
     try {
-      await postMutation.mutateAsync(entryId);
+      await postMutation.mutateAsync({ entryId, idempotencyKey });
+      postAttemptKeysRef.current.delete(entryId);
       await invalidateAccountingViews();
       setFeedbackSuccess("Draft posted successfully.");
       showSuccess("Draft posted successfully.");
     } catch (error) {
+      if (!isRetriableIdempotencyError(error)) {
+        postAttemptKeysRef.current.delete(entryId);
+      }
       setFeedbackError(getErrorMessage(error));
     }
   };
@@ -330,6 +364,7 @@ export const JournalPage = () => {
   const handleOpenReverseModal = (entry: JournalEntry) => {
     setFeedbackError(null);
     setFeedbackSuccess(null);
+    reverseAttemptRef.current = null;
     setReversalModalEntry(entry);
     setReversalReason("");
   };
@@ -339,17 +374,36 @@ export const JournalPage = () => {
     if (!reversalModalEntry) return;
     setFeedbackError(null);
     setFeedbackSuccess(null);
+    const cleanReason = reversalReason.trim();
+    const cachedAttempt = reverseAttemptRef.current;
+    const idempotencyKey =
+      cachedAttempt &&
+      cachedAttempt.entryId === reversalModalEntry.id &&
+      cachedAttempt.reason === cleanReason
+        ? cachedAttempt.key
+        : nextRowId();
+    reverseAttemptRef.current = {
+      entryId: reversalModalEntry.id,
+      reason: cleanReason,
+      key: idempotencyKey,
+    };
+
     try {
       const reversed = await reverseMutation.mutateAsync({
         entryId: reversalModalEntry.id,
-        reason: reversalReason.trim() || undefined,
+        reason: cleanReason || undefined,
+        idempotencyKey,
       });
+      reverseAttemptRef.current = null;
       await invalidateAccountingViews();
       const message = `Journal entry JE-${reversalModalEntry.id} successfully reversed with entry JE-${reversed.id}.`;
       setFeedbackSuccess(message);
       showSuccess(message);
       setReversalModalEntry(null);
     } catch (error) {
+      if (!isRetriableIdempotencyError(error)) {
+        reverseAttemptRef.current = null;
+      }
       setFeedbackError(getErrorMessage(error));
     }
   };
@@ -847,7 +901,10 @@ export const JournalPage = () => {
               <div className="flex justify-end gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => setReversalModalEntry(null)}
+                  onClick={() => {
+                    reverseAttemptRef.current = null;
+                    setReversalModalEntry(null);
+                  }}
                   className="btn-secondary"
                   disabled={reverseMutation.isPending}
                 >

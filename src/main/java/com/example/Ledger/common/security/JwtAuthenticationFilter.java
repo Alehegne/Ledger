@@ -3,6 +3,7 @@ package com.example.Ledger.common.security;
 import com.example.Ledger.common.enums.OrganizationKind;
 import com.example.Ledger.common.enums.OrganizationStatus;
 import com.example.Ledger.common.enums.UserStatus;
+import com.example.Ledger.common.observability.ObservabilityCorrelationFilter;
 import com.example.Ledger.common.response.ApiErrorResponse;
 import com.example.Ledger.organization.model.Organization;
 import com.example.Ledger.user.model.LedgerUser;
@@ -17,6 +18,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -39,8 +41,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final Set<String> PUBLIC_PATHS = Set.of(
             "/auth/login",
             "/auth/refresh",
-            "/invitations/accept",
-            "/actuator/health"
+            "/invitations/accept"
     );
 
     private final JwtService jwtService;
@@ -72,105 +73,122 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             HttpServletResponse response,
             FilterChain filterChain
     ) throws ServletException, IOException {
-        String authorizationHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
-        if (StringUtils.hasText(authorizationHeader) && authorizationHeader.startsWith("Bearer ")) {
-            String token = authorizationHeader.substring(7).trim();
-            UserPrincipal tokenPrincipal;
-            try {
-                Claims claims = jwtService.parseClaims(token);
-                tokenPrincipal = jwtService.toPrincipal(claims);
-            } catch (JwtException | IllegalArgumentException ex) {
-                SecurityContextHolder.clearContext();
-                filterChain.doFilter(request, response);
-                return;
-            }
+        String previousUserId = MDC.get(ObservabilityCorrelationFilter.MDC_USER_ID);
+        String previousOrganizationId = MDC.get(ObservabilityCorrelationFilter.MDC_ORGANIZATION_ID);
+        try {
+            String authorizationHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
+            if (StringUtils.hasText(authorizationHeader) && authorizationHeader.startsWith("Bearer ")) {
+                String token = authorizationHeader.substring(7).trim();
+                UserPrincipal tokenPrincipal;
+                try {
+                    Claims claims = jwtService.parseClaims(token);
+                    tokenPrincipal = jwtService.toPrincipal(claims);
+                } catch (JwtException | IllegalArgumentException ex) {
+                    SecurityContextHolder.clearContext();
+                    filterChain.doFilter(request, response);
+                    return;
+                }
 
-            Optional<LedgerUser> userOpt;
-            try {
-                userOpt = userRepository.findWithOrganizationById(tokenPrincipal.getUserId());
-            } catch (DataAccessException | TransactionException | PersistenceException ex) {
-                SecurityContextHolder.clearContext();
-                log.error(
-                        "Database failure while verifying authentication state for userId={}",
-                        tokenPrincipal.getUserId(),
-                        ex
+                Optional<LedgerUser> userOpt;
+                try {
+                    userOpt = userRepository.findWithOrganizationById(tokenPrincipal.getUserId());
+                } catch (DataAccessException | TransactionException | PersistenceException ex) {
+                    SecurityContextHolder.clearContext();
+                    log.error(
+                            "Database failure while verifying authentication state for userId={}",
+                            tokenPrincipal.getUserId(),
+                            ex
+                    );
+                    writeErrorResponse(
+                            response,
+                            request,
+                            HttpServletResponse.SC_SERVICE_UNAVAILABLE,
+                            "SERVICE_UNAVAILABLE",
+                            "Authentication verification is temporarily unavailable"
+                    );
+                    return;
+                }
+
+                if (userOpt.isEmpty()) {
+                    SecurityContextHolder.clearContext();
+                    filterChain.doFilter(request, response);
+                    return;
+                }
+
+                LedgerUser user = userOpt.get();
+                MDC.put(ObservabilityCorrelationFilter.MDC_USER_ID, String.valueOf(user.getId()));
+                if (user.getStatus() == UserStatus.DISABLED) {
+                    SecurityContextHolder.clearContext();
+                    writeErrorResponse(
+                            response,
+                            request,
+                            HttpServletResponse.SC_FORBIDDEN,
+                            "USER_DISABLED",
+                            "User account has been disabled"
+                    );
+                    return;
+                }
+
+                Organization org = user.getOrganization();
+                if (org == null) {
+                    SecurityContextHolder.clearContext();
+                    filterChain.doFilter(request, response);
+                    return;
+                }
+                MDC.put(ObservabilityCorrelationFilter.MDC_ORGANIZATION_ID, String.valueOf(org.getId()));
+
+                if (org.getKind() == OrganizationKind.TENANT && org.getStatus() == OrganizationStatus.SUSPENDED) {
+                    SecurityContextHolder.clearContext();
+                    writeErrorResponse(
+                            response,
+                            request,
+                            HttpServletResponse.SC_FORBIDDEN,
+                            "ORGANIZATION_SUSPENDED",
+                            "Organization has been suspended"
+                    );
+                    return;
+                }
+
+                if (org.getKind() == OrganizationKind.TENANT && org.getStatus() == OrganizationStatus.PENDING) {
+                    SecurityContextHolder.clearContext();
+                    writeErrorResponse(
+                            response,
+                            request,
+                            HttpServletResponse.SC_FORBIDDEN,
+                            "ORGANIZATION_PENDING",
+                            "Organization onboarding has not been completed"
+                    );
+                    return;
+                }
+
+                UserPrincipal livePrincipal = new UserPrincipal(
+                        user.getId(),
+                        user.getEmail(),
+                        org.getId(),
+                        user.getRole()
                 );
-                writeErrorResponse(
-                        response,
-                        request,
-                        HttpServletResponse.SC_SERVICE_UNAVAILABLE,
-                        "SERVICE_UNAVAILABLE",
-                        "Authentication verification is temporarily unavailable"
+                UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                        livePrincipal,
+                        null,
+                        livePrincipal.getAuthorities()
                 );
-                return;
+                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                SecurityContextHolder.getContext().setAuthentication(authentication);
             }
 
-            if (userOpt.isEmpty()) {
-                SecurityContextHolder.clearContext();
-                filterChain.doFilter(request, response);
-                return;
-            }
-
-            LedgerUser user = userOpt.get();
-            if (user.getStatus() == UserStatus.DISABLED) {
-                SecurityContextHolder.clearContext();
-                writeErrorResponse(
-                        response,
-                        request,
-                        HttpServletResponse.SC_FORBIDDEN,
-                        "USER_DISABLED",
-                        "User account has been disabled"
-                );
-                return;
-            }
-
-            Organization org = user.getOrganization();
-            if (org == null) {
-                SecurityContextHolder.clearContext();
-                filterChain.doFilter(request, response);
-                return;
-            }
-
-            if (org.getKind() == OrganizationKind.TENANT && org.getStatus() == OrganizationStatus.SUSPENDED) {
-                SecurityContextHolder.clearContext();
-                writeErrorResponse(
-                        response,
-                        request,
-                        HttpServletResponse.SC_FORBIDDEN,
-                        "ORGANIZATION_SUSPENDED",
-                        "Organization has been suspended"
-                );
-                return;
-            }
-
-            if (org.getKind() == OrganizationKind.TENANT && org.getStatus() == OrganizationStatus.PENDING) {
-                SecurityContextHolder.clearContext();
-                writeErrorResponse(
-                        response,
-                        request,
-                        HttpServletResponse.SC_FORBIDDEN,
-                        "ORGANIZATION_PENDING",
-                        "Organization onboarding has not been completed"
-                );
-                return;
-            }
-
-            UserPrincipal livePrincipal = new UserPrincipal(
-                    user.getId(),
-                    user.getEmail(),
-                    org.getId(),
-                    user.getRole()
-            );
-            UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                    livePrincipal,
-                    null,
-                    livePrincipal.getAuthorities()
-            );
-            authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-            SecurityContextHolder.getContext().setAuthentication(authentication);
+            filterChain.doFilter(request, response);
+        } finally {
+            restoreMdcValue(ObservabilityCorrelationFilter.MDC_USER_ID, previousUserId);
+            restoreMdcValue(ObservabilityCorrelationFilter.MDC_ORGANIZATION_ID, previousOrganizationId);
         }
+    }
 
-        filterChain.doFilter(request, response);
+    private void restoreMdcValue(String key, String previousValue) {
+        if (previousValue == null) {
+            MDC.remove(key);
+        } else {
+            MDC.put(key, previousValue);
+        }
     }
 
     private void writeErrorResponse(

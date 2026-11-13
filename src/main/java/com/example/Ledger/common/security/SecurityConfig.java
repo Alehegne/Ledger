@@ -43,13 +43,16 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/actuator/health", "/auth/login", "/auth/refresh", "/auth/logout", "/error").permitAll()
+                        .requestMatchers("/actuator/health", "/actuator/health/**", "/auth/login", "/auth/refresh", "/auth/logout", "/error").permitAll()
                         .requestMatchers(HttpMethod.POST, "/invitations/accept").permitAll()
+                        .requestMatchers("/actuator/prometheus", "/actuator/prometheus/**").hasRole("SUPER_ADMIN")
                         .requestMatchers("/admin/**").hasRole("SUPER_ADMIN")
                         .requestMatchers("/organizations/me", "/organizations/settings").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/users/invite").hasRole("ADMIN")
                         .requestMatchers("/users/**", "/invitations", "/invitations/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/audit-logs", "/api/audit-logs/**", "/audit-logs", "/audit-logs/**").hasRole("ADMIN")
+                        .requestMatchers("/api/reconciliation/**").hasRole("ADMIN")
+                        .requestMatchers("/api/outbox/**").hasRole("ADMIN")
                         .requestMatchers("/accounts/**", "/journal-entries/**", "/api/reports/**", "/api/dashboard/**").hasAnyRole("ADMIN", "ACCOUNTANT", "VIEWER")
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex
@@ -64,13 +67,27 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(List.of(
+                "http://localhost",
+                "http://127.0.0.1",
+                "http://localhost:80",
                 "http://localhost:5173",
                 "http://localhost:5174",
                 "http://127.0.0.1:5173",
-                "http://127.0.0.1:5174"
+                "http://127.0.0.1:5174",
+                "http://localhost:3000"
         ));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"));
+        configuration.setAllowedHeaders(List.of(
+                "Authorization",
+                "Content-Type",
+                "Accept",
+                "Origin",
+                "X-Requested-With",
+                "Idempotency-Key",
+                "X-Trace-Id",
+                "X-Correlation-Id"
+        ));
+        configuration.setExposedHeaders(List.of("X-Trace-Id"));
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);
 

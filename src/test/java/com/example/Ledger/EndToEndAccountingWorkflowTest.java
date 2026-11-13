@@ -207,6 +207,7 @@ class EndToEndAccountingWorkflowTest extends PostgresIntegrationTestSupport {
         HttpRequest postHttp = HttpRequest.newBuilder()
                 .uri(URI.create("http://localhost:" + port + "/journal-entries/" + entryId + "/post"))
                 .header("Authorization", "Bearer " + accountantToken)
+                .header("Idempotency-Key", UUID.randomUUID().toString())
                 .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
 
@@ -221,6 +222,7 @@ class EndToEndAccountingWorkflowTest extends PostgresIntegrationTestSupport {
                 .uri(URI.create("http://localhost:" + port + "/journal-entries/" + entryId + "/reverse"))
                 .header("Authorization", "Bearer " + adminToken)
                 .header("Content-Type", "application/json")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
                 .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(new JournalReversalRequest(reversalReason))))
                 .build();
 

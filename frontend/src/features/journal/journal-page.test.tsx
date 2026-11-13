@@ -285,4 +285,51 @@ describe("journal page workflows", () => {
       screen.queryByRole("heading", { name: "Reverse Journal Entry" }),
     ).not.toBeInTheDocument();
   });
+
+  it("reuses the same idempotencyKey when retrying a transient post failure", async () => {
+    const user = userEvent.setup();
+    const seenKeys: Array<string | undefined> = [];
+    const baseService = createMockService(session);
+    let attempts = 0;
+
+    const wrappedService: LedgerService = {
+      ...baseService,
+      postJournalEntry: async (entryId, options) => {
+        seenKeys.push(options?.idempotencyKey);
+        attempts += 1;
+        if (attempts === 1) {
+          throw new Error("Network timeout");
+        }
+        return baseService.postJournalEntry(entryId, options);
+      },
+    };
+
+    const draft = await wrappedService.createJournalDraft({
+      transactionDate: "2026-11-12",
+      description: "Retryable draft",
+      lines: [
+        { accountId: 1, side: "DEBIT", amount: "50.00" },
+        { accountId: 5, side: "CREDIT", amount: "50.00" },
+      ],
+    });
+
+    renderJournalPage(wrappedService);
+
+    const row = await screen.findByText(draft.description);
+    const rowEl = row.closest("tr");
+    expect(rowEl).not.toBeNull();
+    if (!rowEl) return;
+
+    await user.click(within(rowEl).getByRole("button", { name: "Post" }));
+    expect(await screen.findByText(/Network timeout/i)).toBeInTheDocument();
+
+    await user.click(within(rowEl).getByRole("button", { name: "Post" }));
+    expect(
+      await screen.findByText(/Draft posted successfully/i),
+    ).toBeInTheDocument();
+
+    expect(seenKeys).toHaveLength(2);
+    expect(seenKeys[0]).toBeTruthy();
+    expect(seenKeys[0]).toBe(seenKeys[1]);
+  });
 });

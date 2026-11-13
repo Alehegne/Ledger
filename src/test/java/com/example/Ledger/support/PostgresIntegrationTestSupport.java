@@ -2,8 +2,10 @@ package com.example.Ledger.support;
 
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 
+@TestPropertySource(properties = "ledger.outbox.dispatcher.enabled=false")
 public abstract class PostgresIntegrationTestSupport {
 
     static final PostgreSQLContainer<?> POSTGRESQL = new PostgreSQLContainer<>("postgres:16")

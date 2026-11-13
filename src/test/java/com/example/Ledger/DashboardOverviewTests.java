@@ -224,6 +224,10 @@ class DashboardOverviewTests extends PostgresIntegrationTestSupport {
                 .header("Authorization", "Bearer " + token)
                 .header("Content-Type", "application/json");
 
+        if (path.endsWith("/post") || path.endsWith("/reverse")) {
+            builder.header("Idempotency-Key", UUID.randomUUID().toString());
+        }
+
         if (body == null) {
             return HttpClient.newHttpClient().send(builder.POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
         }

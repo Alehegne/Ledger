@@ -834,6 +834,9 @@ class PlatformAdminIntegrationTest extends PostgresIntegrationTestSupport {
         if (bearerToken != null) {
             builder.header("Authorization", "Bearer " + bearerToken);
         }
+        if ("POST".equals(method) && (path.endsWith("/post") || path.endsWith("/reverse"))) {
+            builder.header("Idempotency-Key", UUID.randomUUID().toString());
+        }
         if (body != null) {
             builder.header("Content-Type", "application/json");
             String json = objectMapper.writeValueAsString(body);

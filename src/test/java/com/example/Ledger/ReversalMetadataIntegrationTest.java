@@ -151,6 +151,7 @@ class ReversalMetadataIntegrationTest extends PostgresIntegrationTestSupport {
                 .uri(URI.create("http://localhost:" + port + "/journal-entries/" + original.getId() + "/reverse"))
                 .header("Authorization", "Bearer " + adminToken)
                 .header("Content-Type", "application/json")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
                 .POST(HttpRequest.BodyPublishers.ofString(requestJson))
                 .build();
 
@@ -186,6 +187,7 @@ class ReversalMetadataIntegrationTest extends PostgresIntegrationTestSupport {
                 .uri(URI.create("http://localhost:" + port + "/journal-entries/" + reversalId + "/reverse"))
                 .header("Authorization", "Bearer " + adminToken)
                 .header("Content-Type", "application/json")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
                 .POST(HttpRequest.BodyPublishers.ofString(requestJson))
                 .build();
 

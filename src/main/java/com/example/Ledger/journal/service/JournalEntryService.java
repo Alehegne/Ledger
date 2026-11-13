@@ -10,7 +10,11 @@ import com.example.Ledger.common.enums.JournalEntryStatus;
 import com.example.Ledger.common.enums.Role;
 import com.example.Ledger.common.exception.BusinessException;
 import com.example.Ledger.common.exception.ResourceNotFoundException;
+import com.example.Ledger.common.observability.LedgerMetricsService;
 import com.example.Ledger.common.security.CurrentUserProvider;
+import io.micrometer.core.instrument.Timer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.example.Ledger.journal.dto.JournalEntryPageResponse;
 import com.example.Ledger.journal.dto.JournalEntryRequest;
 import com.example.Ledger.journal.dto.JournalEntryResponse;
@@ -22,6 +26,7 @@ import com.example.Ledger.journal.model.JournalLine;
 import com.example.Ledger.journal.repository.JournalEntryRepository;
 import com.example.Ledger.organization.model.Organization;
 import com.example.Ledger.organization.repository.OrganizationRepository;
+import com.example.Ledger.outbox.service.OutboxEventService;
 import com.example.Ledger.user.model.LedgerUser;
 import com.example.Ledger.user.repository.LedgerUserRepository;
 import jakarta.persistence.criteria.Join;
@@ -49,11 +54,15 @@ import java.util.stream.Collectors;
 @Transactional
 public class JournalEntryService {
 
+    private static final Logger log = LoggerFactory.getLogger(JournalEntryService.class);
+
     private final JournalEntryRepository journalEntryRepository;
     private final AccountRepository accountRepository;
     private final OrganizationRepository organizationRepository;
     private final LedgerUserRepository userRepository;
     private final AuditLogService auditLogService;
+    private final OutboxEventService outboxEventService;
+    private final LedgerMetricsService ledgerMetricsService;
     private final CurrentUserProvider currentUserProvider;
 
     public JournalEntryService(
@@ -62,6 +71,8 @@ public class JournalEntryService {
             OrganizationRepository organizationRepository,
             LedgerUserRepository userRepository,
             AuditLogService auditLogService,
+            OutboxEventService outboxEventService,
+            LedgerMetricsService ledgerMetricsService,
             CurrentUserProvider currentUserProvider
     ) {
         this.journalEntryRepository = journalEntryRepository;
@@ -69,6 +80,8 @@ public class JournalEntryService {
         this.organizationRepository = organizationRepository;
         this.userRepository = userRepository;
         this.auditLogService = auditLogService;
+        this.outboxEventService = outboxEventService;
+        this.ledgerMetricsService = ledgerMetricsService;
         this.currentUserProvider = currentUserProvider;
     }
 
@@ -223,27 +236,59 @@ public class JournalEntryService {
     }
 
     public JournalEntryResponse postEntry(Long entryId) {
-        currentUserProvider.requireRole(Role.ADMIN, Role.ACCOUNTANT);
+        Timer.Sample sample = ledgerMetricsService.startTransactionTimer();
+        try {
+            currentUserProvider.requireRole(Role.ADMIN, Role.ACCOUNTANT);
 
-        Long organizationId = currentUserProvider.getCurrentOrganizationId();
-        JournalEntry entry = journalEntryRepository.findByIdAndOrganizationIdForUpdate(entryId, organizationId)
-                .orElseThrow(() -> new ResourceNotFoundException("Journal entry not found"));
+            Long organizationId = currentUserProvider.getCurrentOrganizationId();
+            JournalEntry entry = journalEntryRepository.findByIdAndOrganizationIdForUpdate(entryId, organizationId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Journal entry not found"));
 
-        ensureDraft(entry);
-        validatePostedEntry(entry, organizationId);
+            ensureDraft(entry);
+            validatePostedEntry(entry, organizationId);
 
-        entry.setStatus(JournalEntryStatus.POSTED);
-        entry.setPostedByUser(loadCurrentUser());
-        entry.setPostedAt(Instant.now());
+            entry.setStatus(JournalEntryStatus.POSTED);
+            entry.setPostedByUser(loadCurrentUser());
+            entry.setPostedAt(Instant.now());
 
-        JournalEntry saved = journalEntryRepository.save(entry);
-        auditLogService.recordAudit(
-                AuditLogAction.JOURNAL_POSTED,
-                "JOURNAL_ENTRY",
-                String.valueOf(saved.getId()),
-                Map.of("status", saved.getStatus().name())
-        );
-        return mapEntry(saved);
+            JournalEntry saved = journalEntryRepository.save(entry);
+            auditLogService.recordAudit(
+                    AuditLogAction.JOURNAL_POSTED,
+                    "JOURNAL_ENTRY",
+                    String.valueOf(saved.getId()),
+                    Map.of("status", saved.getStatus().name())
+            );
+
+            BigDecimal totalDebits = sumBySide(saved, EntrySide.DEBIT);
+            BigDecimal totalCredits = sumBySide(saved, EntrySide.CREDIT);
+
+            Map<String, Object> outboxPayload = new LinkedHashMap<>();
+            outboxPayload.put("entryId", saved.getId());
+            outboxPayload.put("organizationId", saved.getOrganization().getId());
+            outboxPayload.put("transactionDate", saved.getTransactionDate().toString());
+            outboxPayload.put("reference", saved.getReference());
+            outboxPayload.put("description", saved.getDescription());
+            outboxPayload.put("totalDebits", totalDebits);
+            outboxPayload.put("totalCredits", totalCredits);
+            outboxPayload.put("postedByUserId", saved.getPostedByUser() == null ? null : saved.getPostedByUser().getId());
+            outboxPayload.put("postedAt", saved.getPostedAt().toString());
+            outboxPayload.put("lineCount", saved.getLines().size());
+            outboxPayload.put("isReversal", false);
+
+            outboxEventService.recordEvent(
+                    saved.getOrganization(),
+                    "JOURNAL_POSTED",
+                    "JOURNAL_ENTRY",
+                    String.valueOf(saved.getId()),
+                    outboxPayload
+            );
+            ledgerMetricsService.recordJournalPostedAfterCommit();
+            log.info("Posted journal entry id={} with totalDebits={} lines={}",
+                    saved.getId(), totalDebits, saved.getLines().size());
+            return mapEntry(saved);
+        } finally {
+            ledgerMetricsService.stopTransactionTimer(sample);
+        }
     }
 
     private JournalEntry loadEntry(Long entryId, Long organizationId) {
@@ -426,15 +471,8 @@ public class JournalEntryService {
                 ))
                 .toList();
 
-        BigDecimal totalDebits = entry.getLines().stream()
-                .filter(line -> line.getSide() == EntrySide.DEBIT)
-                .map(JournalLine::getAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        BigDecimal totalCredits = entry.getLines().stream()
-                .filter(line -> line.getSide() == EntrySide.CREDIT)
-                .map(JournalLine::getAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal totalDebits = sumBySide(entry, EntrySide.DEBIT);
+        BigDecimal totalCredits = sumBySide(entry, EntrySide.CREDIT);
 
         return new JournalEntryResponse(
                 entry.getId(),
@@ -455,5 +493,12 @@ public class JournalEntryService {
                 entry.getReversesEntry() == null ? null : entry.getReversesEntry().getId(),
                 entry.getReversalReason()
         );
+    }
+
+    private BigDecimal sumBySide(JournalEntry entry, EntrySide side) {
+        return entry.getLines().stream()
+                .filter(line -> line.getSide() == side)
+                .map(JournalLine::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 }

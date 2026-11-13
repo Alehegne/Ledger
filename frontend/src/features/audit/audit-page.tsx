@@ -28,6 +28,7 @@ const ACTION_COLORS: Record<string, string> = {
   ORGANIZATION_SETTINGS_UPDATED: "bg-teal-100 text-teal-800 border-teal-200",
   ORGANIZATION_ACTIVATED: "bg-emerald-100 text-emerald-800 border-emerald-200",
   ORGANIZATION_REGISTERED: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  RECONCILIATION_RUN: "bg-cyan-100 text-cyan-800 border-cyan-200",
 };
 
 export const AuditPage = () => {
@@ -109,6 +110,7 @@ export const AuditPage = () => {
             </option>
             <option value="ORGANIZATION_ACTIVATED">Org Activated</option>
             <option value="ORGANIZATION_REGISTERED">Org Registered</option>
+            <option value="RECONCILIATION_RUN">Reconciliation Run</option>
           </select>
 
           <div className="flex items-center gap-1.5 text-xs text-slate-600">
