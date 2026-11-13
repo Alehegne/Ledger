@@ -31,3 +31,7 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Local Observability Secrets ###
+observability/prometheus/secrets/*
+!observability/prometheus/secrets/.gitkeep
