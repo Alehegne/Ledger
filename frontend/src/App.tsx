@@ -19,6 +19,7 @@ import { AccountsPage } from "./features/accounts/accounts-page";
 import { JournalPage } from "./features/journal/journal-page";
 import { ReportsPage } from "./features/reports/reports-page";
 import { OrganizationPage } from "./features/organization/organization-page";
+import { ReconciliationPage } from "./features/reconciliation/reconciliation-page";
 import { AuditPage } from "./features/audit/audit-page";
 import { AdminOverviewPage } from "./features/admin/admin-overview-page";
 import { AdminOrganizationsPage } from "./features/admin/admin-organizations-page";
@@ -162,6 +163,14 @@ function App() {
               element={
                 <RequireRole allowedRoles={["ADMIN"]}>
                   <AuditPage />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/reconciliation"
+              element={
+                <RequireRole allowedRoles={["ADMIN"]}>
+                  <ReconciliationPage />
                 </RequireRole>
               }
             />

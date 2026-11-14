@@ -20,6 +20,10 @@ import type {
   PlatformOrganizationUser,
   PlatformOverview,
   PlatformPendingInvitationSummary,
+  ReconciliationCheckResult,
+  ReconciliationDiscrepancy,
+  ReconciliationRun,
+  ReconciliationStatus,
   RecoveryInvitationResult,
   Role,
   TrialBalanceReport,
@@ -73,6 +77,11 @@ type ApiJournalEntry = {
 };
 
 const toMoneyString = (value: number | string): string => String(value);
+
+const createIdempotencyKey = (): string =>
+  typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 const toUiPage = (apiPage?: number) => (apiPage ?? 0) + 1;
 const toApiPage = (uiPage?: number) => Math.max((uiPage ?? 1) - 1, 0);
@@ -1274,6 +1283,98 @@ const mapPlatformAuditLogItem = (value: unknown): PlatformAuditLogItem => {
   };
 };
 
+const VALID_RECONCILIATION_STATUSES: readonly ReconciliationStatus[] = [
+  "PASSED",
+  "FAILED",
+];
+
+const requireMoneyField = (
+  obj: Record<string, unknown>,
+  field: string,
+  context: string,
+): string => {
+  const val = obj[field];
+  if (typeof val !== "number" && typeof val !== "string") {
+    throw new Error(`Invalid ${context}: missing or invalid ${field}.`);
+  }
+  return toMoneyString(val);
+};
+
+const mapReconciliationDiscrepancy = (
+  value: unknown,
+): ReconciliationDiscrepancy => {
+  if (!isPlainObject(value)) {
+    throw new Error(
+      "Invalid reconciliation discrepancy: expected an object.",
+    );
+  }
+  const ctx = "reconciliation discrepancy";
+  return {
+    entityType: requireStringField(value, "entityType", ctx),
+    entityId: requireStringField(value, "entityId", ctx),
+    reference: typeof value.reference === "string" ? value.reference : "",
+    expectedAmount: requireMoneyField(value, "expectedAmount", ctx),
+    actualAmount: requireMoneyField(value, "actualAmount", ctx),
+    variance: requireMoneyField(value, "variance", ctx),
+    detail: requireStringField(value, "detail", ctx),
+  };
+};
+
+const mapReconciliationCheckResult = (
+  value: unknown,
+): ReconciliationCheckResult => {
+  if (!isPlainObject(value)) {
+    throw new Error("Invalid reconciliation check: expected an object.");
+  }
+  const ctx = "reconciliation check";
+  if (typeof value.passed !== "boolean" || typeof value.blocking !== "boolean") {
+    throw new Error(`Invalid ${ctx}: missing boolean flags.`);
+  }
+  if (!Array.isArray(value.discrepancies)) {
+    throw new Error(`Invalid ${ctx}: discrepancies must be an array.`);
+  }
+  return {
+    code: requireStringField(value, "code", ctx),
+    name: requireStringField(value, "name", ctx),
+    passed: value.passed,
+    blocking: value.blocking,
+    variance: requireMoneyField(value, "variance", ctx),
+    summary: requireStringField(value, "summary", ctx),
+    discrepancies: value.discrepancies.map(mapReconciliationDiscrepancy),
+  };
+};
+
+const mapReconciliationRun = (value: unknown): ReconciliationRun => {
+  if (!isPlainObject(value)) {
+    throw new Error("Invalid reconciliation run: expected an object.");
+  }
+  const ctx = "reconciliation run";
+  if (!Array.isArray(value.checks)) {
+    throw new Error(`Invalid ${ctx}: checks must be an array.`);
+  }
+  return {
+    id: requireNumberField(value, "id", ctx),
+    organizationId: requireNumberField(value, "organizationId", ctx),
+    status: requireEnumField(
+      value,
+      "status",
+      VALID_RECONCILIATION_STATUSES,
+      ctx,
+    ),
+    totalPostedDebits: requireMoneyField(value, "totalPostedDebits", ctx),
+    totalPostedCredits: requireMoneyField(value, "totalPostedCredits", ctx),
+    globalVariance: requireMoneyField(value, "globalVariance", ctx),
+    postedEntryCount: requireNumberField(value, "postedEntryCount", ctx),
+    accountCount: requireNumberField(value, "accountCount", ctx),
+    checksPassed: requireNumberField(value, "checksPassed", ctx),
+    checksFailed: requireNumberField(value, "checksFailed", ctx),
+    triggeredByUserId: optionalNumberField(value, "triggeredByUserId"),
+    triggeredByName: optionalStringField(value, "triggeredByName"),
+    checks: value.checks.map(mapReconciliationCheckResult),
+    createdAt: requireStringField(value, "createdAt", ctx),
+  };
+};
+
 export const createApiService = (
   http: ApiHttp,
   currentSession?: AuthSession | null,
@@ -1485,24 +1586,34 @@ export const createApiService = (
       return mapJournalEntry(response);
     },
 
-    async postJournalEntry(entryId): Promise<JournalEntry> {
+    async postJournalEntry(entryId, options): Promise<JournalEntry> {
+      const idempotencyKey = options?.idempotencyKey ?? createIdempotencyKey();
       const response = await request<unknown>(
         `/journal-entries/${entryId}/post`,
         {
           method: "POST",
+          headers: {
+            "Idempotency-Key": idempotencyKey,
+          },
         },
       );
       return mapJournalEntry(response);
     },
 
     async reverseJournalEntry(entryId, payload): Promise<JournalEntry> {
+      const idempotencyKey = payload?.idempotencyKey ?? createIdempotencyKey();
+      const headers: Record<string, string> = {
+        "Idempotency-Key": idempotencyKey,
+      };
+      if (payload?.reason) {
+        headers["Content-Type"] = "application/json";
+      }
+
       const response = await request<unknown>(
         `/journal-entries/${entryId}/reverse`,
         {
           method: "POST",
-          headers: payload?.reason
-            ? { "Content-Type": "application/json" }
-            : undefined,
+          headers,
           body: payload?.reason
             ? JSON.stringify({ reason: payload.reason })
             : undefined,
@@ -1852,6 +1963,47 @@ export const createApiService = (
           typeof response.totalPages === "number" ? response.totalPages : 1,
         items,
       });
+    },
+
+    async runReconciliation(): Promise<ReconciliationRun> {
+      const response = await request<unknown>("/api/reconciliation/run", {
+        method: "POST",
+      });
+      return mapReconciliationRun(response);
+    },
+
+    async listReconciliationHistory(input?: {
+      page?: number;
+      size?: number;
+    }): Promise<PageResult<ReconciliationRun>> {
+      const size = input?.size ?? 20;
+      const path = `/api/reconciliation/history${buildQuery({
+        page: toApiPage(input?.page),
+        size,
+      })}`;
+      const response = await request<unknown>(path);
+      if (!isPlainObject(response) || !Array.isArray(response.items)) {
+        throw new Error(
+          "Invalid reconciliation history response: expected a paginated list.",
+        );
+      }
+      const items = response.items.map(mapReconciliationRun);
+      return mapPageResult({
+        page: typeof response.page === "number" ? response.page : 0,
+        size: typeof response.size === "number" ? response.size : size,
+        totalElements:
+          typeof response.totalElements === "number"
+            ? response.totalElements
+            : items.length,
+        totalPages:
+          typeof response.totalPages === "number" ? response.totalPages : 1,
+        items,
+      });
+    },
+
+    async getReconciliationRun(runId: number): Promise<ReconciliationRun> {
+      const response = await request<unknown>(`/api/reconciliation/${runId}`);
+      return mapReconciliationRun(response);
     },
   };
 };

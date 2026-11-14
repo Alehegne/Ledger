@@ -972,4 +972,132 @@ describe("api service foundational mapping", () => {
       "/admin/audit-logs?action=ORGANIZATION_SUSPENDED&targetOrganizationId=42&from=2026-11-01&to=2026-11-09&page=0&size=20",
     );
   });
+
+  it("sends Idempotency-Key headers on journal post and reverse mutations", async () => {
+    const capturedHeaders: Array<{ path: string; key: string | null }> = [];
+    const baseEntryPayload = {
+      id: 99,
+      organizationId: 42,
+      transactionDate: "2026-11-12",
+      description: "Idempotent journal",
+      reference: "REF-99",
+      status: "POSTED",
+      createdByUserId: 10,
+      postedByUserId: 10,
+      postedAt: "2026-11-12T10:00:00Z",
+      totalDebits: "100.00",
+      totalCredits: "100.00",
+      lines: [
+        {
+          id: 1,
+          accountId: 1,
+          accountCode: "1000",
+          accountName: "Cash",
+          accountType: "ASSET",
+          side: "DEBIT",
+          amount: "100.00",
+        },
+        {
+          id: 2,
+          accountId: 5,
+          accountCode: "4000",
+          accountName: "Revenue",
+          accountType: "REVENUE",
+          side: "CREDIT",
+          amount: "100.00",
+        },
+      ],
+      createdAt: "2026-11-12T09:50:00Z",
+      updatedAt: "2026-11-12T10:00:00Z",
+    };
+
+    const http = vi.fn<ApiHttp>(async (path, init) => {
+      const headers = new Headers(init?.headers);
+      capturedHeaders.push({
+        path,
+        key: headers.get("Idempotency-Key"),
+      });
+      return baseEntryPayload;
+    });
+
+    const service = createApiService(http, adminSession);
+
+    await service.postJournalEntry(99, { idempotencyKey: "post-key-1" });
+    await service.postJournalEntry(99);
+    await service.reverseJournalEntry(99, {
+      reason: "Correction",
+      idempotencyKey: "reverse-key-1",
+    });
+
+    expect(capturedHeaders[0]).toEqual({
+      path: "/journal-entries/99/post",
+      key: "post-key-1",
+    });
+    expect(capturedHeaders[1].path).toBe("/journal-entries/99/post");
+    expect(capturedHeaders[1].key).toBeTruthy();
+    expect(capturedHeaders[2]).toEqual({
+      path: "/journal-entries/99/reverse",
+      key: "reverse-key-1",
+    });
+  });
+
+  it("maps reconciliation run and paginated history responses", async () => {
+    const runPayload = {
+      id: 7,
+      organizationId: 42,
+      status: "PASSED",
+      totalPostedDebits: "1500.0000",
+      totalPostedCredits: "1500.0000",
+      globalVariance: "0.0000",
+      postedEntryCount: 3,
+      accountCount: 5,
+      checksPassed: 4,
+      checksFailed: 0,
+      triggeredByUserId: 10,
+      triggeredByName: "Admin User",
+      checks: [
+        {
+          code: "GLOBAL_DEBIT_CREDIT_BALANCE",
+          name: "Global Posted Debit/Credit Balance",
+          passed: true,
+          blocking: true,
+          variance: "0.0000",
+          summary: "All posted entries balance.",
+          discrepancies: [],
+        },
+      ],
+      createdAt: "2026-11-12T10:00:00Z",
+    };
+
+    const http = vi.fn<ApiHttp>(async (path, init) => {
+      if (path === "/api/reconciliation/run" && init?.method === "POST") {
+        return runPayload;
+      }
+      if (path === "/api/reconciliation/history?page=0&size=10") {
+        return {
+          page: 0,
+          size: 10,
+          totalElements: 1,
+          totalPages: 1,
+          items: [runPayload],
+        };
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    });
+
+    const service = createApiService(http, adminSession);
+
+    const run = await service.runReconciliation();
+    expect(run.status).toBe("PASSED");
+    expect(run.totalPostedDebits).toBe("1500.0000");
+    expect(run.checks).toHaveLength(1);
+
+    const history = await service.listReconciliationHistory({
+      page: 1,
+      size: 10,
+    });
+    expect(history.page).toBe(1);
+    expect(history.totalElements).toBe(1);
+    expect(history.items[0].id).toBe(7);
+  });
 });

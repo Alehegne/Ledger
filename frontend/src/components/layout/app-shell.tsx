@@ -7,6 +7,7 @@ import {
   CreditCard,
   History,
   LogOut,
+  Scale,
   ShieldCheck,
   Users,
 } from "lucide-react";
@@ -46,6 +47,12 @@ const navItems: Array<{
     roles: ["ADMIN", "ACCOUNTANT", "VIEWER"],
   },
   { to: "/users", label: "Users", icon: Users, roles: ["ADMIN"] },
+  {
+    to: "/reconciliation",
+    label: "Reconciliation",
+    icon: Scale,
+    roles: ["ADMIN"],
+  },
   { to: "/audit", label: "Audit Logs", icon: History, roles: ["ADMIN"] },
   { to: "/settings", label: "Settings", icon: ShieldCheck, roles: ["ADMIN"] },
   {

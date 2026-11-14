@@ -49,6 +49,10 @@ const ERROR_CODE_TITLES: Record<string, string> = {
   ORGANIZATION_SUSPENDED: "Organization Suspended",
   ORGANIZATION_PENDING: "Onboarding Incomplete",
   PLATFORM_ORGANIZATION_IMMUTABLE: "Protected Platform Anchor",
+  MISSING_IDEMPOTENCY_KEY: "Idempotency Header Required",
+  INVALID_IDEMPOTENCY_KEY: "Invalid Idempotency Key",
+  IDEMPOTENCY_KEY_IN_PROGRESS: "Operation Already In Progress",
+  IDEMPOTENCY_PAYLOAD_MISMATCH: "Idempotency Request Mismatch",
   SERVICE_UNAVAILABLE: "Authentication Service Unavailable",
   RESOURCE_NOT_FOUND: "Record Not Found",
   FORBIDDEN: "Permission Denied",
@@ -78,6 +82,10 @@ const ERROR_CODE_GUIDANCE: Record<string, string> = {
     "Organization onboarding has not been completed yet. Accept the onboarding administrator invitation first.",
   INVITATION_SUPERSEDED:
     "This invitation has been superseded by a newer invitation.",
+  IDEMPOTENCY_KEY_IN_PROGRESS:
+    "This posting or reversal request is still being processed. Wait a moment and refresh before retrying.",
+  IDEMPOTENCY_PAYLOAD_MISMATCH:
+    "This idempotency key was already used with a different journal action or payload.",
   FORBIDDEN: "You do not have sufficient permissions for this operation.",
   UNAUTHORIZED: "Your session has expired. Please sign in again.",
 };

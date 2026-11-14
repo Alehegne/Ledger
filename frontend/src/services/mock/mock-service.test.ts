@@ -389,4 +389,26 @@ describe("mock accounting model", () => {
     expect(reversed.id).not.toBe(original.id);
     expect(reversed.description).toContain("reversal");
   });
+
+  it("executes reconciliation checks for ADMIN and blocks non-admin roles", async () => {
+    const adminService = createMockService(makeSession("ADMIN"));
+    const viewerService = createMockService(makeSession("VIEWER"));
+
+    await expect(viewerService.runReconciliation()).rejects.toThrow(
+      /not authorized/i,
+    );
+
+    const run = await adminService.runReconciliation();
+    expect(run.status).toBe("PASSED");
+    expect(run.globalVariance).toBe("0.00");
+    expect(run.checksPassed).toBe(4);
+    expect(run.checksFailed).toBe(0);
+
+    const history = await adminService.listReconciliationHistory({
+      page: 1,
+      size: 10,
+    });
+    expect(history.totalElements).toBeGreaterThanOrEqual(1);
+    expect(history.items[0].id).toBe(run.id);
+  });
 });

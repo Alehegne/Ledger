@@ -18,6 +18,7 @@ import type {
   PlatformOrganizationSummary,
   PlatformOrganizationUser,
   PlatformOverview,
+  ReconciliationRun,
   RecoveryInvitationResult,
   Role,
   TrialBalanceReport,
@@ -111,10 +112,13 @@ export interface LedgerService {
     entryId: number,
     payload: SaveJournalInput,
   ): Promise<JournalEntry>;
-  postJournalEntry(entryId: number): Promise<JournalEntry>;
+  postJournalEntry(
+    entryId: number,
+    options?: { idempotencyKey?: string },
+  ): Promise<JournalEntry>;
   reverseJournalEntry(
     entryId: number,
-    payload?: { reason?: string },
+    payload?: { reason?: string; idempotencyKey?: string },
   ): Promise<JournalEntry>;
   deleteDraft(entryId: number): Promise<void>;
 
@@ -183,4 +187,11 @@ export interface LedgerService {
   listPlatformAuditLogs(
     input: ListPlatformAuditInput,
   ): Promise<PageResult<PlatformAuditLogItem>>;
+
+  runReconciliation(): Promise<ReconciliationRun>;
+  listReconciliationHistory(input?: {
+    page?: number;
+    size?: number;
+  }): Promise<PageResult<ReconciliationRun>>;
+  getReconciliationRun(runId: number): Promise<ReconciliationRun>;
 }

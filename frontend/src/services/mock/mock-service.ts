@@ -20,6 +20,9 @@ import type {
   PlatformOrganizationSummary,
   PlatformOrganizationUser,
   PlatformOverview,
+  ReconciliationCheckResult,
+  ReconciliationDiscrepancy,
+  ReconciliationRun,
   RecoveryInvitationResult,
   Role,
   TrialBalanceReport,
@@ -554,6 +557,7 @@ const getInitialState = () => ({
   platformUsers: clone(platformUsersSeed),
   platformInvitations: clone(platformInvitationsSeed),
   platformAuditLogs: clone(platformAuditSeed),
+  reconciliationRuns: [] as ReconciliationRun[],
 });
 
 export const resetMockServiceState = () => {
@@ -614,6 +618,9 @@ const loadState = () => {
       platformAuditLogs: Array.isArray(parsed.platformAuditLogs)
         ? (parsed.platformAuditLogs as PlatformAuditLogItem[])
         : clone(platformAuditSeed),
+      reconciliationRuns: Array.isArray(parsed.reconciliationRuns)
+        ? (parsed.reconciliationRuns as ReconciliationRun[])
+        : [],
     };
   } catch {
     if (typeof window !== "undefined") {
@@ -691,6 +698,11 @@ export const createMockService = (
     const normalized = normalizeJournalPayload(payload);
     return validateDraftLines(state, organizationId, normalized);
   };
+
+  const idempotencyCache = new Map<
+    string,
+    { signature: string; result: JournalEntry }
+  >();
 
   const computeBalanceForAccount = (accountId: number, asOfDate?: string) => {
     const targetDate = asOfDate ?? "9999-12-31";
@@ -1172,8 +1184,28 @@ export const createMockService = (
       return clone(updated);
     },
 
-    async postJournalEntry(entryId: number): Promise<JournalEntry> {
+    async postJournalEntry(
+      entryId: number,
+      options?: { idempotencyKey?: string },
+    ): Promise<JournalEntry> {
       requireRole(["ADMIN", "ACCOUNTANT"], "post journal entries");
+      const cacheKey = options?.idempotencyKey?.trim();
+      const signature = `POST /journal-entries/${entryId}/post`;
+      if (cacheKey) {
+        const cached = idempotencyCache.get(cacheKey);
+        if (cached) {
+          if (cached.signature !== signature) {
+            throw new AppError({
+              status: 422,
+              code: "IDEMPOTENCY_PAYLOAD_MISMATCH",
+              message:
+                "Idempotency-Key was already used with a different endpoint or request payload",
+            });
+          }
+          return clone(cached.result);
+        }
+      }
+
       const index = state.journalEntries.findIndex(
         (entry) =>
           entry.id === entryId && entry.organizationId === organizationId,
@@ -1202,15 +1234,36 @@ export const createMockService = (
         postedAt: new Date().toISOString(),
       };
       state.journalEntries[index] = posted;
+      if (cacheKey) {
+        idempotencyCache.set(cacheKey, { signature, result: clone(posted) });
+      }
       persist();
       return clone(posted);
     },
 
     async reverseJournalEntry(
       entryId: number,
-      payload?: { reason?: string },
+      payload?: { reason?: string; idempotencyKey?: string },
     ): Promise<JournalEntry> {
       requireRole(["ADMIN", "ACCOUNTANT"], "reverse journal entries");
+      const cacheKey = payload?.idempotencyKey?.trim();
+      const cleanReasonInput = payload?.reason?.trim() ?? "";
+      const signature = `POST /journal-entries/${entryId}/reverse:${cleanReasonInput}`;
+      if (cacheKey) {
+        const cached = idempotencyCache.get(cacheKey);
+        if (cached) {
+          if (cached.signature !== signature) {
+            throw new AppError({
+              status: 422,
+              code: "IDEMPOTENCY_PAYLOAD_MISMATCH",
+              message:
+                "Idempotency-Key was already used with a different endpoint or request payload",
+            });
+          }
+          return clone(cached.result);
+        }
+      }
+
       const entry = await this.getJournalEntry(entryId);
       if (entry.status !== "POSTED") {
         throw new Error("Only posted journal entries can be reversed.");
@@ -1273,6 +1326,9 @@ export const createMockService = (
       }
 
       state.journalEntries.unshift(reverse);
+      if (cacheKey) {
+        idempotencyCache.set(cacheKey, { signature, result: clone(reverse) });
+      }
       persist();
       return clone(reverse);
     },
@@ -2289,6 +2345,286 @@ export const createMockService = (
         totalPages: Math.max(1, Math.ceil(filtered.length / size)),
         items: clone(filtered.slice(start, start + size)),
       };
+    },
+
+    async runReconciliation(): Promise<ReconciliationRun> {
+      requireRole(["ADMIN"], "run financial reconciliation");
+      const orgAccounts = state.accounts.filter(
+        (acc) => acc.organizationId === organizationId,
+      );
+      const postedEntries = getPostedEntries(state.journalEntries).filter(
+        (entry) => entry.organizationId === organizationId,
+      );
+
+      let totalDebits = new Decimal(0);
+      let totalCredits = new Decimal(0);
+      const perEntryDiscrepancies: ReconciliationDiscrepancy[] = [];
+      const totalsByAccount = new Map<
+        number,
+        { debits: Decimal; credits: Decimal }
+      >();
+
+      for (const entry of postedEntries) {
+        let entryDebits = new Decimal(0);
+        let entryCredits = new Decimal(0);
+        let debitLines = 0;
+        let creditLines = 0;
+        for (const line of entry.lines) {
+          const amt = new Decimal(line.amount);
+          const accTotals = totalsByAccount.get(line.accountId) ?? {
+            debits: new Decimal(0),
+            credits: new Decimal(0),
+          };
+          if (line.side === "DEBIT") {
+            entryDebits = entryDebits.plus(amt);
+            accTotals.debits = accTotals.debits.plus(amt);
+            debitLines += 1;
+          } else {
+            entryCredits = entryCredits.plus(amt);
+            accTotals.credits = accTotals.credits.plus(amt);
+            creditLines += 1;
+          }
+          totalsByAccount.set(line.accountId, accTotals);
+        }
+        totalDebits = totalDebits.plus(entryDebits);
+        totalCredits = totalCredits.plus(entryCredits);
+
+        if (
+          !entryDebits.equals(entryCredits) ||
+          entry.lines.length < 2 ||
+          debitLines === 0 ||
+          creditLines === 0
+        ) {
+          perEntryDiscrepancies.push({
+            entityType: "JOURNAL_ENTRY",
+            entityId: String(entry.id),
+            reference: entry.reference ?? entry.description,
+            expectedAmount: entryDebits.toFixed(2),
+            actualAmount: entryCredits.toFixed(2),
+            variance: entryDebits.minus(entryCredits).abs().toFixed(2),
+            detail: `Posted journal entry #${entry.id} violates per-entry double-entry balance.`,
+          });
+        }
+      }
+
+      const globalVariance = totalDebits.minus(totalCredits).abs();
+      const globalCheck: ReconciliationCheckResult = {
+        code: "GLOBAL_DEBIT_CREDIT_BALANCE",
+        name: "Global Posted Debit/Credit Balance",
+        passed: globalVariance.isZero(),
+        blocking: true,
+        variance: globalVariance.toFixed(2),
+        summary: globalVariance.isZero()
+          ? `All ${postedEntries.length} posted journal entries balance globally (Debits = Credits = ${totalDebits.toFixed(2)}).`
+          : `Global ledger out of balance by ${globalVariance.toFixed(2)}.`,
+        discrepancies: globalVariance.isZero()
+          ? []
+          : [
+              {
+                entityType: "ORGANIZATION",
+                entityId: String(organizationId),
+                reference: state.settings.name,
+                expectedAmount: totalDebits.toFixed(2),
+                actualAmount: totalCredits.toFixed(2),
+                variance: globalVariance.toFixed(2),
+                detail: "Global posted debits do not equal global posted credits.",
+              },
+            ],
+      };
+
+      const entryVarianceSum = perEntryDiscrepancies.reduce(
+        (sum, item) => sum.plus(item.variance),
+        new Decimal(0),
+      );
+      const perEntryCheck: ReconciliationCheckResult = {
+        code: "PER_ENTRY_BALANCE",
+        name: "Per-Entry Double-Entry Balance",
+        passed: perEntryDiscrepancies.length === 0,
+        blocking: true,
+        variance: entryVarianceSum.toFixed(2),
+        summary:
+          perEntryDiscrepancies.length === 0
+            ? `Verified all ${postedEntries.length} posted journal entries individually maintain Debits = Credits with >= 2 opposing lines.`
+            : `Detected ${perEntryDiscrepancies.length} posted entry discrepancy(ies).`,
+        discrepancies: perEntryDiscrepancies,
+      };
+
+      let tbDebits = new Decimal(0);
+      let tbCredits = new Decimal(0);
+      for (const acc of orgAccounts) {
+        const totals = totalsByAccount.get(acc.id) ?? {
+          debits: new Decimal(0),
+          credits: new Decimal(0),
+        };
+        if (acc.accountType === "ASSET" || acc.accountType === "EXPENSE") {
+          if (totals.debits.gte(totals.credits)) {
+            tbDebits = tbDebits.plus(totals.debits.minus(totals.credits));
+          } else {
+            tbCredits = tbCredits.plus(totals.credits.minus(totals.debits));
+          }
+        } else {
+          if (totals.credits.gte(totals.debits)) {
+            tbCredits = tbCredits.plus(totals.credits.minus(totals.debits));
+          } else {
+            tbDebits = tbDebits.plus(totals.debits.minus(totals.credits));
+          }
+        }
+      }
+      const tbVariance = tbDebits.minus(tbCredits).abs();
+      const trialBalanceCheck: ReconciliationCheckResult = {
+        code: "TRIAL_BALANCE_AND_GL_PARITY",
+        name: "Trial Balance & GL Integrity Parity",
+        passed: tbVariance.isZero(),
+        blocking: true,
+        variance: tbVariance.toFixed(2),
+        summary: tbVariance.isZero()
+          ? `Trial Balance (${tbDebits.toFixed(2)} DR / ${tbCredits.toFixed(2)} CR across ${orgAccounts.length} accounts) ties out identically to General Ledger totals.`
+          : `Trial Balance out of balance by ${tbVariance.toFixed(2)}.`,
+        discrepancies: tbVariance.isZero()
+          ? []
+          : [
+              {
+                entityType: "TRIAL_BALANCE",
+                entityId: String(organizationId),
+                reference: "TRIAL_BALANCE",
+                expectedAmount: tbDebits.toFixed(2),
+                actualAmount: tbCredits.toFixed(2),
+                variance: tbVariance.toFixed(2),
+                detail: "Trial Balance total debits do not equal total credits.",
+              },
+            ],
+      };
+
+      const accountById = new Map(orgAccounts.map((acc) => [acc.id, acc]));
+      const hierarchyErrors: ReconciliationDiscrepancy[] = [];
+      for (const acc of orgAccounts) {
+        if (acc.parentAccountId === null) continue;
+        if (acc.parentAccountId === acc.id || !accountById.has(acc.parentAccountId)) {
+          hierarchyErrors.push({
+            entityType: "ACCOUNT",
+            entityId: String(acc.id),
+            reference: acc.accountCode,
+            expectedAmount: "0.00",
+            actualAmount: "0.00",
+            variance: "1.00",
+            detail: `Account ${acc.accountCode} has an invalid parent reference.`,
+          });
+          continue;
+        }
+        const visited = new Set<number>([acc.id]);
+        let cursor: number | null = acc.parentAccountId;
+        while (cursor !== null) {
+          if (visited.has(cursor)) {
+            hierarchyErrors.push({
+              entityType: "ACCOUNT",
+              entityId: String(acc.id),
+              reference: acc.accountCode,
+              expectedAmount: "0.00",
+              actualAmount: "0.00",
+              variance: "1.00",
+              detail: `Circular parent-account hierarchy detected involving ${acc.accountCode}.`,
+            });
+            break;
+          }
+          visited.add(cursor);
+          cursor = accountById.get(cursor)?.parentAccountId ?? null;
+        }
+      }
+
+      const hierarchyCheck: ReconciliationCheckResult = {
+        code: "ACCOUNT_HIERARCHY_INTEGRITY",
+        name: "Account Hierarchy & Rollup Integrity",
+        passed: hierarchyErrors.length === 0,
+        blocking: hierarchyErrors.length > 0,
+        variance:
+          hierarchyErrors.length === 0
+            ? "0.00"
+            : String(hierarchyErrors.length),
+        summary:
+          hierarchyErrors.length === 0
+            ? `Evaluated ${orgAccounts.length} accounts; no cycles or invalid parent links detected.`
+            : `Detected ${hierarchyErrors.length} structural hierarchy error(s).`,
+        discrepancies: hierarchyErrors,
+      };
+
+      const checks = [
+        globalCheck,
+        perEntryCheck,
+        trialBalanceCheck,
+        hierarchyCheck,
+      ];
+      const checksPassed = checks.filter((c) => c.passed).length;
+      const checksFailed = checks.length - checksPassed;
+      const runId =
+        Math.max(...state.reconciliationRuns.map((r) => r.id), 0) + 1;
+      const createdAt = new Date().toISOString();
+      const run: ReconciliationRun = {
+        id: runId,
+        organizationId,
+        status: checksFailed === 0 ? "PASSED" : "FAILED",
+        totalPostedDebits: totalDebits.toFixed(2),
+        totalPostedCredits: totalCredits.toFixed(2),
+        globalVariance: globalVariance.toFixed(2),
+        postedEntryCount: postedEntries.length,
+        accountCount: orgAccounts.length,
+        checksPassed,
+        checksFailed,
+        triggeredByUserId: currentUserId,
+        triggeredByName: activeSession.user.fullName,
+        checks,
+        createdAt,
+      };
+
+      state.reconciliationRuns.unshift(run);
+      const nextAuditId =
+        Math.max(...state.auditLogs.map((item) => item.id), 0) + 1;
+      state.auditLogs.unshift({
+        id: nextAuditId,
+        actor: activeSession.user.email,
+        action: "RECONCILIATION_RUN",
+        entityType: "RECONCILIATION_RUN",
+        entityId: String(runId),
+        createdAt,
+        metadata: JSON.stringify({
+          status: run.status,
+          globalVariance: run.globalVariance,
+          checksPassed,
+          checksFailed,
+        }),
+      });
+      persist();
+      return clone(run);
+    },
+
+    async listReconciliationHistory(input?: {
+      page?: number;
+      size?: number;
+    }): Promise<PageResult<ReconciliationRun>> {
+      requireRole(["ADMIN"], "view reconciliation history");
+      const orgRuns = state.reconciliationRuns.filter(
+        (run) => run.organizationId === organizationId,
+      );
+      const page = input?.page ?? 1;
+      const size = input?.size ?? 20;
+      const start = (page - 1) * size;
+      return {
+        page,
+        size,
+        totalElements: orgRuns.length,
+        totalPages: Math.max(1, Math.ceil(orgRuns.length / size)),
+        items: clone(orgRuns.slice(start, start + size)),
+      };
+    },
+
+    async getReconciliationRun(runId: number): Promise<ReconciliationRun> {
+      requireRole(["ADMIN"], "view reconciliation run");
+      const found = state.reconciliationRuns.find(
+        (run) => run.id === runId && run.organizationId === organizationId,
+      );
+      if (!found) {
+        throw new Error("Reconciliation run not found.");
+      }
+      return clone(found);
     },
   };
 };

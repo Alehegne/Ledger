@@ -288,3 +288,42 @@ export interface PlatformAuditLogItem {
   createdAt: string;
   metadata: string;
 }
+
+export type ReconciliationStatus = "PASSED" | "FAILED";
+
+export interface ReconciliationDiscrepancy {
+  entityType: string;
+  entityId: string;
+  reference: string;
+  expectedAmount: string;
+  actualAmount: string;
+  variance: string;
+  detail: string;
+}
+
+export interface ReconciliationCheckResult {
+  code: string;
+  name: string;
+  passed: boolean;
+  blocking: boolean;
+  variance: string;
+  summary: string;
+  discrepancies: ReconciliationDiscrepancy[];
+}
+
+export interface ReconciliationRun {
+  id: number;
+  organizationId: number;
+  status: ReconciliationStatus;
+  totalPostedDebits: string;
+  totalPostedCredits: string;
+  globalVariance: string;
+  postedEntryCount: number;
+  accountCount: number;
+  checksPassed: number;
+  checksFailed: number;
+  triggeredByUserId: number | null;
+  triggeredByName: string | null;
+  checks: ReconciliationCheckResult[];
+  createdAt: string;
+}
