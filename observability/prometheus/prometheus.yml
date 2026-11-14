@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+  scrape_timeout: 5s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: ledger-api
+    scrape_interval: 5s
+    metrics_path: /actuator/prometheus
+    scheme: http
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/ledger_bearer_token
+    static_configs:
+      - targets: ["backend:8080", "host.docker.internal:8080"]
+        labels:
+          application: Ledger
+          environment: local
