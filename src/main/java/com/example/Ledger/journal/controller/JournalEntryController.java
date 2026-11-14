@@ -1,6 +1,7 @@
 package com.example.Ledger.journal.controller;
 
 import com.example.Ledger.common.enums.JournalEntryStatus;
+import com.example.Ledger.common.idempotency.Idempotent;
 import com.example.Ledger.journal.dto.JournalEntryPageResponse;
 import com.example.Ledger.journal.dto.JournalEntryRequest;
 import com.example.Ledger.journal.dto.JournalEntryResponse;
@@ -72,12 +73,14 @@ public class JournalEntryController {
         journalEntryService.deleteDraft(entryId);
     }
 
+    @Idempotent
     @PostMapping("/journal-entries/{entryId}/post")
     @PreAuthorize("hasAnyRole('ADMIN','ACCOUNTANT')")
     public JournalEntryResponse post(@PathVariable Long entryId) {
         return journalEntryService.postEntry(entryId);
     }
 
+    @Idempotent
     @PostMapping("/journal-entries/{entryId}/reverse")
     @PreAuthorize("hasAnyRole('ADMIN','ACCOUNTANT')")
     public JournalEntryResponse reverse(
